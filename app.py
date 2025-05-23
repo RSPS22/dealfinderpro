@@ -1,71 +1,19 @@
 import os
 import pandas as pd
-from flask import Flask, render_template, request, send_from_directory, jsonify
+from flask import Flask, render_template, request, send_from_directory
 from werkzeug.utils import secure_filename
 from docx import Document
 from datetime import datetime
+import uuid
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['GENERATED_LOIS_FOLDER'] = 'generated_lois'
-app.config['OFFER_TEMPLATE_PATH'] = 'Offer_Sheet_Template.docx'
+app.config['GENERATED_FOLDER'] = 'generated_lois'
+app.config['TEMPLATE_PATH'] = 'Offer_Sheet_Template.docx'
 
-# Ensure folders exist
+# Ensure necessary folders exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-os.makedirs(app.config['GENERATED_LOIS_FOLDER'], exist_ok=True)
-
-def calculate_offer_price(arv, condition):
-    condition_discounts = {
-        'Light': 0.70,
-        'Medium': 0.60,
-        'Heavy': 0.50
-    }
-    discount = condition_discounts.get(condition, 0.60)
-    return round(arv * discount)
-
-def calculate_arv(property_row, comps_df):
-    sqft_col = 'Living Area'
-    price_col = 'Last Sale Amount'
-    if sqft_col not in comps_df.columns or price_col not in comps_df.columns:
-        return None, 0, 0, "Missing Columns"
-    try:
-        comps_df[price_col] = comps_df[price_col].replace('[\$,]', '', regex=True).astype(float)
-        comps_df[sqft_col] = comps_df[sqft_col].replace('[\$,]', '', regex=True).astype(float)
-    except Exception:
-        return None, 0, 0, "Parse Error"
-
-    comps_df = comps_df[comps_df[sqft_col] > 0]
-    comps_df['$/sqft'] = comps_df[price_col] / comps_df[sqft_col]
-    comps_df = comps_df.dropna(subset=['$/sqft'])
-
-    if comps_df.empty:
-        return None, 0, 0, "No Comps"
-
-    avg_price_per_sqft = comps_df['$/sqft'].mean()
-    property_sqft = property_row.get('Living Square Feet', 0)
-    try:
-        property_sqft = float(str(property_sqft).replace(',', ''))
-    except Exception:
-        property_sqft = 0
-
-    arv = avg_price_per_sqft * property_sqft if property_sqft else 0
-    return round(arv), len(comps_df), round(avg_price_per_sqft, 2), "OK"
-
-def generate_loi(data, template_path, output_path):
-    doc = Document(template_path)
-    placeholders = {
-        '[PROPERTY_ADDRESS]': data.get('Address', ''),
-        '[OFFER_PRICE]': f"${int(data.get('Offer Price', 0)):,}",
-        '[BUYER_NAME]': data.get('User Name', ''),
-        '[BUYER_EMAIL]': data.get('User Email', ''),
-        '[BUSINESS_NAME]': data.get('Business Name', ''),
-        '[DATE]': datetime.now().strftime("%B %d, %Y")
-    }
-    for p in doc.paragraphs:
-        for key, val in placeholders.items():
-            if key in p.text:
-                p.text = p.text.replace(key, val)
-    doc.save(output_path)
+os.makedirs(app.config['GENERATED_FOLDER'], exist_ok=True)
 
 @app.route('/')
 def index():
@@ -73,71 +21,85 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload():
-    try:
-        prop_file = request.files.get('propertyFile')
-        comps_file = request.files.get('compsFile')
-        business_name = request.form.get('businessName', '')
-        user_name = request.form.get('userName', '')
-        user_email = request.form.get('userEmail', '')
+    property_file = request.files['propertyFile']
+    comps_file = request.files['compsFile']
+    business_name = request.form.get('businessName', '')
+    user_name = request.form.get('userName', '')
+    user_email = request.form.get('userEmail', '')
 
-        prop_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(prop_file.filename))
-        comps_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(comps_file.filename))
-        prop_file.save(prop_path)
-        comps_file.save(comps_path)
+    # Save uploaded files
+    prop_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(property_file.filename))
+    comps_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(comps_file.filename))
+    property_file.save(prop_path)
+    comps_file.save(comps_path)
 
-        properties = pd.read_csv(prop_path)
-        comps = pd.read_csv(comps_path)
+    # Load property and comps data
+    properties_df = pd.read_csv(prop_path)
+    comps_df = pd.read_csv(comps_path)
 
-        properties['Condition Override'] = properties.get('Condition Override', 'Medium')
-        results = []
+    # Ensure required columns exist
+    required_columns = ['Address', 'City', 'State', 'Zip', 'Listing Price', 'Living Square Feet']
+    comps_required = ['Address', 'Living Square Feet', 'Last Sale Amount']
 
-        for idx, row in properties.iterrows():
-            condition = row.get('Condition Override', 'Medium')
-            arv, comps_used, avg_ppsf, arv_status = calculate_arv(row, comps)
-            offer = calculate_offer_price(arv, condition)
-            listing_price = row.get('Listing Price', 0)
-            try:
-                listing_price = float(str(listing_price).replace(',', '').replace('$', ''))
-            except:
-                listing_price = 0
+    if not all(col in properties_df.columns for col in required_columns):
+        return 'Missing required columns in properties file.', 400
+    if not all(col in comps_df.columns for col in comps_required):
+        return 'Missing required columns in comps file.', 400
 
-            high_potential = offer <= (arv * 0.55) if arv else False
-            loi_filename = f"LOI_{idx}.docx"
-            loi_path = os.path.join(app.config['GENERATED_LOIS_FOLDER'], loi_filename)
+    # Calculate $/sqft for comps
+    comps_df['$/sqft'] = comps_df['Last Sale Amount'].replace('[\$,]', '', regex=True).astype(float) / comps_df['Living Square Feet'].replace(',', '', regex=True).astype(float)
 
-            loi_data = {
-                **row.to_dict(),
-                'Offer Price': offer,
-                'Business Name': business_name,
-                'User Name': user_name,
-                'User Email': user_email
-            }
+    def calculate_arv(row):
+        sqft = row['Living Square Feet']
+        if pd.isna(sqft):
+            return None
+        try:
+            sqft = float(str(sqft).replace(',', ''))
+        except:
+            return None
+        filtered_comps = comps_df[
+            comps_df['Living Square Feet'].replace(',', '', regex=True).astype(float).between(sqft - 250, sqft + 250)
+        ]
+        if not filtered_comps.empty:
+            avg_price_per_sqft = filtered_comps['$/sqft'].mean()
+            return round(avg_price_per_sqft * sqft, 2)
+        return None
 
-            generate_loi(loi_data, app.config['OFFER_TEMPLATE_PATH'], loi_path)
+    properties_df['ARV'] = properties_df.apply(calculate_arv, axis=1)
+    properties_df['Offer Price'] = properties_df['ARV'] * 0.6
+    properties_df['High Potential'] = properties_df.apply(lambda row: row['Offer Price'] <= row['ARV'] * 0.55 if not pd.isna(row['ARV']) and not pd.isna(row['Offer Price']) else False, axis=1)
 
-            results.append({
-                **row,
-                'ARV': arv,
-                'Offer Price': offer,
-                'Comps Used': comps_used,
-                'Avg Comp $/Sqft': avg_ppsf,
-                'High Potential': high_potential,
-                'LOI File': loi_filename
-            })
+    # Format prices
+    properties_df['ARV'] = properties_df['ARV'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else 'N/A')
+    properties_df['Offer Price'] = properties_df['Offer Price'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else 'N/A')
 
-        results_df = pd.DataFrame(results)
-        output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'results.csv')
-        results_df.to_csv(output_path, index=False)
-        return results_df.to_json(orient='records')
+    # Generate LOI files
+    for _, row in properties_df.iterrows():
+        if isinstance(row['Offer Price'], str) and row['Offer Price'].startswith('$'):
+            offer_price_clean = row['Offer Price'].replace('$', '').replace(',', '')
+        else:
+            offer_price_clean = str(row['Offer Price'])
 
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        doc = Document(app.config['TEMPLATE_PATH'])
+        for p in doc.paragraphs:
+            p.text = p.text.replace('{{address}}', str(row['Address']))
+            p.text = p.text.replace('{{offer_price}}', offer_price_clean)
+            p.text = p.text.replace('{{user_name}}', user_name)
+            p.text = p.text.replace('{{user_email}}', user_email)
+            p.text = p.text.replace('{{business_name}}', business_name)
 
-@app.route('/download-loi/<filename>')
+        filename = f"LOI_{uuid.uuid4().hex[:8]}.docx"
+        doc_path = os.path.join(app.config['GENERATED_FOLDER'], filename)
+        doc.save(doc_path)
+
+    return 'Upload successful. LOIs generated.', 200
+
+@app.route('/generated_lois/<filename>')
 def download_loi(filename):
-    return send_from_directory(app.config['GENERATED_LOIS_FOLDER'], filename, as_attachment=True)
+    return send_from_directory(app.config['GENERATED_FOLDER'], filename)
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
