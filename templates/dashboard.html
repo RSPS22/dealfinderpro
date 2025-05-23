@@ -1,56 +1,99 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Deal Finder Dashboard</title>
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <meta charset="UTF-8">
+    <title>Deal Finder Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background-color: #f7f7f7;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .dashboard-metrics {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .metric-card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            padding: 20px;
+            flex: 1 1 200px;
+            min-width: 200px;
+        }
+        .metric-title {
+            font-size: 16px;
+            color: #666;
+        }
+        .metric-value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #2a9d8f;
+        }
+        .nav {
+            margin-bottom: 30px;
+        }
+        .nav a {
+            margin-right: 20px;
+            text-decoration: none;
+            color: #0077cc;
+        }
+        .nav a:hover {
+            text-decoration: underline;
+        }
+    </style>
+    <script>
+        async function loadDashboard() {
+            try {
+                const response = await fetch('/dashboard-data');
+                const data = await response.json();
+                document.getElementById('total-properties').textContent = data.total_properties || 0;
+                document.getElementById('high-potential').textContent = data.total_high_potential || 0;
+                document.getElementById('lois-sent').textContent = data.lois_sent || 0;
+                document.getElementById('followups-sent').textContent = data.followups_sent || 0;
+                document.getElementById('unique-users').textContent = data.unique_users || 'N/A';
+            } catch (error) {
+                console.error("Error loading dashboard:", error);
+            }
+        }
+        window.onload = loadDashboard;
+    </script>
 </head>
-<body class="bg-gray-100 text-gray-800">
-  <div class="max-w-4xl mx-auto px-4 py-8">
-    <h1 class="text-3xl font-bold mb-6 text-center">📊 Deal Finder Dashboard</h1>
-    
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-      <div class="bg-white p-6 rounded-xl shadow text-center">
-        <h2 class="text-xl font-semibold mb-2">📁 Total Properties Uploaded</h2>
-        <p class="text-3xl font-bold text-blue-600" id="total-uploaded">0</p>
-      </div>
-      
-      <div class="bg-white p-6 rounded-xl shadow text-center">
-        <h2 class="text-xl font-semibold mb-2">✅ High Potential Properties</h2>
-        <p class="text-3xl font-bold text-green-600" id="high-potential-count">0</p>
-      </div>
-
-      <div class="bg-white p-6 rounded-xl shadow text-center">
-        <h2 class="text-xl font-semibold mb-2">📨 LOIs Sent</h2>
-        <p class="text-3xl font-bold text-purple-600" id="lois-sent-count">0</p>
-      </div>
-
-      <div class="bg-white p-6 rounded-xl shadow text-center">
-        <h2 class="text-xl font-semibold mb-2">🔁 Follow-Ups Sent</h2>
-        <p class="text-3xl font-bold text-yellow-600" id="followups-sent-count">0</p>
-      </div>
+<body>
+    <div class="nav">
+        <a href="/">← Back to Main App</a>
+        <a href="/upload">Upload New File</a>
     </div>
 
-    <div class="mt-8 text-center">
-      <a href="/" class="inline-block bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-600 transition">← Back to Main App</a>
+    <h1>📊 Deal Finder Dashboard</h1>
+    <div class="dashboard-metrics">
+        <div class="metric-card">
+            <div class="metric-title">Total Uploaded Properties</div>
+            <div class="metric-value" id="total-properties">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-title">High Potential Deals</div>
+            <div class="metric-value" id="high-potential">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-title">LOIs Sent</div>
+            <div class="metric-value" id="lois-sent">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-title">Follow-Ups Sent</div>
+            <div class="metric-value" id="followups-sent">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-title">User Sessions / Account</div>
+            <div class="metric-value" id="unique-users">N/A</div>
+        </div>
     </div>
-  </div>
-
-  <script>
-    // Fetch dashboard data from Flask (update route if necessary)
-    fetch('/dashboard-data')
-      .then(response => response.json())
-      .then(data => {
-        document.getElementById('total-uploaded').innerText = data.total_uploaded || 0;
-        document.getElementById('high-potential-count').innerText = data.high_potential || 0;
-        document.getElementById('lois-sent-count').innerText = data.lois_sent || 0;
-        document.getElementById('followups-sent-count').innerText = data.followups_sent || 0;
-      })
-      .catch(err => {
-        console.error('Failed to load dashboard data:', err);
-      });
-  </script>
 </body>
 </html>
+
 
