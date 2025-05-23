@@ -1,22 +1,21 @@
 import os
 import pandas as pd
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, request, render_template, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 from docx import Document
-import uuid
+from datetime import datetime
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['GENERATED_FOLDER'] = 'generated'
+app.config['GENERATED_LOIS_FOLDER'] = 'generated_lois'
+app.config['TEMPLATE_FILE'] = 'Offer_Sheet_Template.docx'
 
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-os.makedirs(app.config['GENERATED_FOLDER'], exist_ok=True)
+# Ensure folders exist
+if not os.path.isdir(app.config['UPLOAD_FOLDER']):
+    os.makedirs(app.config['UPLOAD_FOLDER'])
 
-def format_currency(value):
-    try:
-        return "${:,.0f}".format(float(value))
-    except:
-        return "N/A"
+if not os.path.isdir(app.config['GENERATED_LOIS_FOLDER']):
+    os.makedirs(app.config['GENERATED_LOIS_FOLDER'])
 
 @app.route('/')
 def index():
@@ -24,92 +23,78 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload():
-    property_file = request.files.get('propertyFile')
-    comps_file = request.files.get('compsFile')
-    business_name = request.form.get('businessName', '')
-    user_name = request.form.get('userName', '')
-    user_email = request.form.get('userEmail', '')
-
-    if not property_file or not comps_file:
-        return jsonify({'error': 'Missing required files'}), 400
-
-    prop_filename = secure_filename(property_file.filename)
-    comps_filename = secure_filename(comps_file.filename)
-
-    property_path = os.path.join(app.config['UPLOAD_FOLDER'], prop_filename)
-    comps_path = os.path.join(app.config['UPLOAD_FOLDER'], comps_filename)
-
-    property_file.save(property_path)
-    comps_file.save(comps_path)
-
     try:
-        df = pd.read_csv(property_path)
+        property_file = request.files['propertyFile']
+        comps_file = request.files['compsFile']
+        business_name = request.form.get('businessName', '')
+        user_name = request.form.get('userName', '')
+        user_email = request.form.get('userEmail', '')
+
+        # Save property and comps files
+        property_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(property_file.filename))
+        comps_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(comps_file.filename))
+        property_file.save(property_path)
+        comps_file.save(comps_path)
+
+        # Load data
+        properties_df = pd.read_csv(property_path)
         comps_df = pd.read_csv(comps_path)
 
-        if 'Living Square Feet' not in comps_df.columns or 'Last Sale Amount' not in comps_df.columns:
-            return jsonify({'error': 'Missing required columns in comps file.'}), 400
+        # Ensure required columns
+        required_cols = ['Address', 'City', 'State', 'Zip', 'Listing Price', 'Living Square Feet']
+        for col in required_cols:
+            if col not in properties_df.columns:
+                return jsonify({'error': f"Missing column in property file: {col}"}), 400
 
-        comps_df['$/sqft'] = comps_df['Last Sale Amount'].replace('[\$,]', '', regex=True).astype(float) / comps_df['Living Square Feet'].replace('[\$,]', '', regex=True).astype(float)
-        avg_price_per_sqft = comps_df['$/sqft'].mean()
+        if 'Last Sale Amount' not in comps_df.columns or 'Living Square Feet' not in comps_df.columns:
+            return jsonify({'error': "Missing required columns in comps file."}), 400
 
-        df['ARV'] = df['Living Square Feet'].replace('[\$,]', '', regex=True).astype(float) * avg_price_per_sqft
-        df['Offer Price'] = df['ARV'] * 0.6
-        df['High Potential'] = df['Offer Price'] <= df['ARV'] * 0.55
+        # Clean and calculate $/sqft in comps
+        comps_df['Last Sale Amount'] = comps_df['Last Sale Amount'].replace('[\$,]', '', regex=True).astype(float)
+        comps_df['Living Square Feet'] = comps_df['Living Square Feet'].replace(',', '', regex=True).astype(float)
+        comps_df['$/sqft'] = comps_df['Last Sale Amount'] / comps_df['Living Square Feet']
 
-        df['ARV'] = df['ARV'].apply(format_currency)
-        df['Offer Price'] = df['Offer Price'].apply(format_currency)
+        avg_sqft_price = comps_df['$/sqft'].mean()
 
-        results = df.to_dict(orient='records')
+        # Calculate ARV and offer price
+        properties_df['Living Square Feet'] = properties_df['Living Square Feet'].replace(',', '', regex=True).astype(float)
+        properties_df['ARV'] = properties_df['Living Square Feet'] * avg_sqft_price
+        properties_df['Offer Price'] = properties_df['ARV'] * 0.60
 
-        return jsonify({
-            'data': results,
-            'message': 'Upload and processing successful.',
-            'businessName': business_name,
-            'userName': user_name,
-            'userEmail': user_email
-        })
+        # Format prices
+        properties_df['ARV'] = properties_df['ARV'].apply(lambda x: f"${x:,.0f}")
+        properties_df['Offer Price'] = properties_df['Offer Price'].apply(lambda x: f"${x:,.0f}")
 
-    except Exception as e:
-        return jsonify({'error': f'Processing failed: {str(e)}'}), 500
+        # High Potential
+        properties_df['High Potential'] = (
+            properties_df['Offer Price'].replace('[\$,]', '', regex=True).astype(float) <=
+            0.55 * properties_df['ARV'].replace('[\$,]', '', regex=True).astype(float)
+        )
 
-@app.route('/generate-loi', methods=['POST'])
-def generate_loi():
-    try:
-        data = request.json
-        address = data.get('Address')
-        offer_price = data.get('Offer Price')
-        business_name = data.get('Business Name')
-        user_name = data.get('User Name')
-        user_email = data.get('User Email')
+        # Generate LOIs
+        loi_paths = []
+        for idx, row in properties_df.iterrows():
+            doc = Document(app.config['TEMPLATE_FILE'])
+            for para in doc.paragraphs:
+                para.text = para.text.replace('{property_address}', row['Address'])
+                para.text = para.text.replace('{offer_price}', row['Offer Price'])
+                para.text = para.text.replace('{business_name}', business_name)
+                para.text = para.text.replace('{user_name}', user_name)
+                para.text = para.text.replace('{user_email}', user_email)
+            loi_filename = f"LOI_{idx}.docx"
+            loi_path = os.path.join(app.config['GENERATED_LOIS_FOLDER'], loi_filename)
+            doc.save(loi_path)
+            loi_paths.append(loi_filename)
 
-        template_path = 'templates/Offer_Sheet_Template.docx'
-        doc = Document(template_path)
-
-        for para in doc.paragraphs:
-            if "{{address}}" in para.text:
-                para.text = para.text.replace("{{address}}", address or "")
-            if "{{offer_price}}" in para.text:
-                para.text = para.text.replace("{{offer_price}}", offer_price or "")
-            if "{{business_name}}" in para.text:
-                para.text = para.text.replace("{{business_name}}", business_name or "")
-            if "{{user_name}}" in para.text:
-                para.text = para.text.replace("{{user_name}}", user_name or "")
-            if "{{user_email}}" in para.text:
-                para.text = para.text.replace("{{user_email}}", user_email or "")
-
-        filename = f"LOI_{uuid.uuid4().hex}.docx"
-        filepath = os.path.join(app.config['GENERATED_FOLDER'], filename)
-        doc.save(filepath)
-
-        return jsonify({'downloadUrl': f'/download/{filename}'})
+        return jsonify({'message': 'Upload successful', 'files': loi_paths})
 
     except Exception as e:
-        return jsonify({'error': f'Failed to generate LOI: {str(e)}'}), 500
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/download/<filename>')
-def download_file(filename):
-    filepath = os.path.join(app.config['GENERATED_FOLDER'], filename)
-    return send_file(filepath, as_attachment=True)
+@app.route('/generated_lois/<filename>')
+def download_loi(filename):
+    return send_from_directory(app.config['GENERATED_LOIS_FOLDER'], filename)
 
 if __name__ == '__main__':
     app.run(debug=True)
+
