@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Deal Finder</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 40px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      table-layout: fixed;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      text-align: left;
+      word-wrap: break-word;
+    }
+    th {
+      cursor: pointer;
+      background-color: #f2f2f2;
+    }
+    .high-potential {
+      background-color: #c8e6c9 !important;
+    }
+    .sticky {
+      position: sticky;
+      left: 0;
+      background: white;
+      z-index: 2;
+    }
+    #progressBar {
+      width: 100%;
+      background-color: #f3f3f3;
+      margin-top: 10px;
+    }
+    #progressBarFill {
+      height: 20px;
+      width: 0%;
+      background-color: #4caf50;
+      text-align: center;
+      color: white;
+      line-height: 20px;
+    }
+    button {
+      margin: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Deal Finder App</h1>
+
+  <form id="uploadForm" enctype="multipart/form-data">
+    <label>Property File: <input type="file" name="propertyFile" required></label><br>
+    <label>Comps File: <input type="file" name="compsFile" required></label><br>
+    <label>Business Name: <input type="text" name="businessName"></label><br>
+    <label>Your Name: <input type="text" name="userName"></label><br>
+    <label>Your Email: <input type="email" name="userEmail"></label><br>
+    <button type="submit">Upload</button>
+  </form>
+
+  <div id="progressBar"><div id="progressBarFill"></div></div>
+
+  <div id="tableContainer"></div>
+
+  <script>
+    const form = document.getElementById('uploadForm');
+    const progressBarFill = document.getElementById('progressBarFill');
+
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const formData = new FormData(form);
+      progressBarFill.style.width = '0%';
+
+      const res = await fetch('/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!res.ok) {
+        alert('Upload failed. Server response: ' + await res.text());
+        return;
+      }
+
+      const data = await res.json();
+      progressBarFill.style.width = '100%';
+
+      const container = document.getElementById('tableContainer');
+      const columns = Object.keys(data[0] || {});
+      let html = '<table id="resultsTable"><thead><tr>';
+
+      columns.forEach(col => {
+        html += `<th onclick="sortTable('${col}')">${col}</th>`;
+      });
+      html += '<th>Actions</th></tr></thead><tbody>';
+
+      data.forEach(row => {
+        const isHigh = row['High Potential'] === true || row['High Potential'] === 'TRUE';
+        html += `<tr class="${isHigh ? 'high-potential' : ''}">`;
+        columns.forEach(col => {
+          let val = row[col];
+          if (typeof val === 'number' && col.toLowerCase().includes('price')) {
+            val = "$" + val.toLocaleString(undefined, {maximumFractionDigits: 0});
+          }
+          html += `<td>${val === null || val === undefined || val === '' ? 'N/A' : val}</td>`;
+        });
+
+        const rowId = row['Id'];
+        html += `<td>
+          <button onclick="saveOverride('${rowId}')">Save</button>
+          <button onclick="window.open('/lois/${rowId}', '_blank')">LOI</button>
+          <button onclick="sendFollowUp('${rowId}')">Follow Up</button>
+        </td></tr>`;
+      });
+
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    };
+
+    function sortTable(column) {
+      const table = document.getElementById("resultsTable");
+      const thIndex = Array.from(table.rows[0].cells).findIndex(th => th.innerText === column);
+      const rows = Array.from(table.rows).slice(1);
+      const ascending = table.getAttribute("data-sort-col") !== column;
+
+      rows.sort((a, b) => {
+        const cellA = a.cells[thIndex].innerText.replace(/[^0-9.-]+/g, '');
+        const cellB = b.cells[thIndex].innerText.replace(/[^0-9.-]+/g, '');
+        const valA = isNaN(cellA) ? cellA : parseFloat(cellA);
+        const valB = isNaN(cellB) ? cellB : parseFloat(cellB);
+        return ascending ? valA > valB ? 1 : -1 : valA < valB ? 1 : -1;
+      });
+
+      rows.forEach(row => table.tBodies[0].appendChild(row));
+      table.setAttribute("data-sort-col", column);
+    }
+
+    async function saveOverride(id) {
+      const newValue = prompt("Enter new condition (Light, Medium, Heavy):");
+      if (!newValue) return;
+      const res = await fetch('/override', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id, condition: newValue})
+      });
+      if (res.ok) location.reload();
+      else alert("Save failed.");
+    }
+
+    async function sendFollowUp(id) {
+      const res = await fetch(`/followup/${id}`, { method: 'POST' });
+      if (res.ok) alert("Follow-up sent.");
+      else alert("Follow-up failed.");
+    }
+  </script>
+</body>
+</html>
