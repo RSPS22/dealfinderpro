@@ -3,51 +3,54 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Dashboard</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <title>Deal Finder Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 </head>
-<body>
-  <div class="container py-5">
-    <h1 class="mb-4">Deal Finder Dashboard</h1>
-    <div class="row">
-      <div class="col-md-3">
-        <div class="card text-bg-primary mb-3">
-          <div class="card-body">
-            <h5 class="card-title">Total Uploaded</h5>
-            <p class="card-text fs-4">{{ total_uploaded }}</p>
-          </div>
-        </div>
+<body class="bg-gray-100 text-gray-800">
+  <div class="max-w-4xl mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold mb-6 text-center">📊 Deal Finder Dashboard</h1>
+    
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+      <div class="bg-white p-6 rounded-xl shadow text-center">
+        <h2 class="text-xl font-semibold mb-2">📁 Total Properties Uploaded</h2>
+        <p class="text-3xl font-bold text-blue-600" id="total-uploaded">0</p>
       </div>
-      <div class="col-md-3">
-        <div class="card text-bg-success mb-3">
-          <div class="card-body">
-            <h5 class="card-title">High Potential</h5>
-            <p class="card-text fs-4">{{ high_potential }}</p>
-          </div>
-        </div>
+      
+      <div class="bg-white p-6 rounded-xl shadow text-center">
+        <h2 class="text-xl font-semibold mb-2">✅ High Potential Properties</h2>
+        <p class="text-3xl font-bold text-green-600" id="high-potential-count">0</p>
       </div>
-      <div class="col-md-3">
-        <div class="card text-bg-warning mb-3">
-          <div class="card-body">
-            <h5 class="card-title">LOIs Sent</h5>
-            <p class="card-text fs-4">{{ lois_sent }}</p>
-          </div>
-        </div>
+
+      <div class="bg-white p-6 rounded-xl shadow text-center">
+        <h2 class="text-xl font-semibold mb-2">📨 LOIs Sent</h2>
+        <p class="text-3xl font-bold text-purple-600" id="lois-sent-count">0</p>
       </div>
-      <div class="col-md-3">
-        <div class="card text-bg-info mb-3">
-          <div class="card-body">
-            <h5 class="card-title">Follow-Ups Sent</h5>
-            <p class="card-text fs-4">{{ followups_sent }}</p>
-          </div>
-        </div>
+
+      <div class="bg-white p-6 rounded-xl shadow text-center">
+        <h2 class="text-xl font-semibold mb-2">🔁 Follow-Ups Sent</h2>
+        <p class="text-3xl font-bold text-yellow-600" id="followups-sent-count">0</p>
       </div>
     </div>
-    {% if user_name %}
-    <p class="mt-4">Current User: <strong>{{ user_name }}</strong> ({{ user_email }})</p>
-    {% endif %}
-    <a href="/" class="btn btn-secondary mt-3">Back to Upload</a>
+
+    <div class="mt-8 text-center">
+      <a href="/" class="inline-block bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-600 transition">← Back to Main App</a>
+    </div>
   </div>
+
+  <script>
+    // Fetch dashboard data from Flask (update route if necessary)
+    fetch('/dashboard-data')
+      .then(response => response.json())
+      .then(data => {
+        document.getElementById('total-uploaded').innerText = data.total_uploaded || 0;
+        document.getElementById('high-potential-count').innerText = data.high_potential || 0;
+        document.getElementById('lois-sent-count').innerText = data.lois_sent || 0;
+        document.getElementById('followups-sent-count').innerText = data.followups_sent || 0;
+      })
+      .catch(err => {
+        console.error('Failed to load dashboard data:', err);
+      });
+  </script>
 </body>
 </html>
 
