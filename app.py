@@ -1,17 +1,14 @@
+from flask import Flask, render_template, request, jsonify, send_file
 import os
 import pandas as pd
-from flask import Flask, render_template, request, send_from_directory
-from werkzeug.utils import secure_filename
 from docx import Document
+from werkzeug.utils import secure_filename
 from datetime import datetime
-import uuid
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['GENERATED_FOLDER'] = 'generated_lois'
-app.config['TEMPLATE_PATH'] = 'Offer_Sheet_Template.docx'
 
-# Ensure necessary folders exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['GENERATED_FOLDER'], exist_ok=True)
 
@@ -21,85 +18,83 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload():
-    property_file = request.files['propertyFile']
-    comps_file = request.files['compsFile']
-    business_name = request.form.get('businessName', '')
-    user_name = request.form.get('userName', '')
-    user_email = request.form.get('userEmail', '')
+    try:
+        property_file = request.files['propertyFile']
+        comps_file = request.files['compsFile']
+        business_name = request.form.get('businessName', '')
+        user_name = request.form.get('userName', '')
+        user_email = request.form.get('userEmail', '')
 
-    # Save uploaded files
-    prop_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(property_file.filename))
-    comps_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(comps_file.filename))
-    property_file.save(prop_path)
-    comps_file.save(comps_path)
+        prop_filename = secure_filename(property_file.filename)
+        comps_filename = secure_filename(comps_file.filename)
 
-    # Load property and comps data
-    properties_df = pd.read_csv(prop_path)
-    comps_df = pd.read_csv(comps_path)
+        prop_path = os.path.join(app.config['UPLOAD_FOLDER'], prop_filename)
+        comps_path = os.path.join(app.config['UPLOAD_FOLDER'], comps_filename)
 
-    # Ensure required columns exist
-    required_columns = ['Address', 'City', 'State', 'Zip', 'Listing Price', 'Living Square Feet']
-    comps_required = ['Address', 'Living Square Feet', 'Last Sale Amount']
+        property_file.save(prop_path)
+        comps_file.save(comps_path)
 
-    if not all(col in properties_df.columns for col in required_columns):
-        return 'Missing required columns in properties file.', 400
-    if not all(col in comps_df.columns for col in comps_required):
-        return 'Missing required columns in comps file.', 400
+        properties_df = pd.read_csv(prop_path)
+        comps_df = pd.read_csv(comps_path)
 
-    # Calculate $/sqft for comps
-    comps_df['$/sqft'] = comps_df['Last Sale Amount'].replace('[\$,]', '', regex=True).astype(float) / comps_df['Living Square Feet'].replace(',', '', regex=True).astype(float)
+        # Clean and convert comps data
+        if 'Sold Price' not in comps_df.columns or 'Living Square Feet' not in comps_df.columns:
+            return jsonify({'error': 'Missing required columns in comps file.'}), 400
 
-    def calculate_arv(row):
-        sqft = row['Living Square Feet']
-        if pd.isna(sqft):
-            return None
-        try:
-            sqft = float(str(sqft).replace(',', ''))
-        except:
-            return None
-        filtered_comps = comps_df[
-            comps_df['Living Square Feet'].replace(',', '', regex=True).astype(float).between(sqft - 250, sqft + 250)
-        ]
-        if not filtered_comps.empty:
-            avg_price_per_sqft = filtered_comps['$/sqft'].mean()
-            return round(avg_price_per_sqft * sqft, 2)
-        return None
+        comps_df['Sold Price'] = comps_df['Sold Price'].replace('[\$,]', '', regex=True)
+        comps_df['Sold Price'] = pd.to_numeric(comps_df['Sold Price'], errors='coerce')
 
-    properties_df['ARV'] = properties_df.apply(calculate_arv, axis=1)
-    properties_df['Offer Price'] = properties_df['ARV'] * 0.6
-    properties_df['High Potential'] = properties_df.apply(lambda row: row['Offer Price'] <= row['ARV'] * 0.55 if not pd.isna(row['ARV']) and not pd.isna(row['Offer Price']) else False, axis=1)
+        comps_df['Living Square Feet'] = comps_df['Living Square Feet'].replace(',', '', regex=True)
+        comps_df['Living Square Feet'] = pd.to_numeric(comps_df['Living Square Feet'], errors='coerce')
 
-    # Format prices
-    properties_df['ARV'] = properties_df['ARV'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else 'N/A')
-    properties_df['Offer Price'] = properties_df['Offer Price'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else 'N/A')
+        comps_df.dropna(subset=['Sold Price', 'Living Square Feet'], inplace=True)
 
-    # Generate LOI files
-    for _, row in properties_df.iterrows():
-        if isinstance(row['Offer Price'], str) and row['Offer Price'].startswith('$'):
-            offer_price_clean = row['Offer Price'].replace('$', '').replace(',', '')
-        else:
-            offer_price_clean = str(row['Offer Price'])
+        comps_df['$/sqft'] = comps_df['Sold Price'] / comps_df['Living Square Feet']
+        average_price_per_sqft = comps_df['$/sqft'].mean()
 
-        doc = Document(app.config['TEMPLATE_PATH'])
-        for p in doc.paragraphs:
-            p.text = p.text.replace('{{address}}', str(row['Address']))
-            p.text = p.text.replace('{{offer_price}}', offer_price_clean)
-            p.text = p.text.replace('{{user_name}}', user_name)
-            p.text = p.text.replace('{{user_email}}', user_email)
-            p.text = p.text.replace('{{business_name}}', business_name)
+        # Compute ARV and Offer Price
+        if 'Living Square Feet' in properties_df.columns:
+            properties_df['Living Square Feet'] = properties_df['Living Square Feet'].replace(',', '', regex=True)
+            properties_df['Living Square Feet'] = pd.to_numeric(properties_df['Living Square Feet'], errors='coerce')
 
-        filename = f"LOI_{uuid.uuid4().hex[:8]}.docx"
-        doc_path = os.path.join(app.config['GENERATED_FOLDER'], filename)
-        doc.save(doc_path)
+        properties_df['ARV'] = properties_df['Living Square Feet'] * average_price_per_sqft
+        properties_df['Offer Price'] = properties_df['ARV'] * 0.60
 
-    return 'Upload successful. LOIs generated.', 200
+        # Identify High Potential
+        properties_df['High Potential'] = properties_df.apply(
+            lambda row: row['Offer Price'] <= row['ARV'] * 0.55 if pd.notna(row['Offer Price']) and pd.notna(row['ARV']) else False,
+            axis=1
+        )
 
-@app.route('/generated_lois/<filename>')
-def download_loi(filename):
-    return send_from_directory(app.config['GENERATED_FOLDER'], filename)
+        # Generate LOIs
+        lois = []
+        template_path = os.path.join('templates', 'Offer_Sheet_Template.docx')
+        for i, row in properties_df.iterrows():
+            if pd.notna(row.get('Address')) and pd.notna(row.get('Offer Price')):
+                try:
+                    doc = Document(template_path)
+                    for paragraph in doc.paragraphs:
+                        paragraph.text = paragraph.text.replace('[Property Address]', str(row.get('Address')))
+                        paragraph.text = paragraph.text.replace('[Buyer Name]', user_name)
+                        paragraph.text = paragraph.text.replace('[Buyer Email]', user_email)
+                        paragraph.text = paragraph.text.replace('[Business Name]', business_name)
+                        paragraph.text = paragraph.text.replace('[Purchase Price]', f"${row.get('Offer Price'):,.0f}")
+
+                    file_name = f"LOI_{i}_{datetime.now().strftime('%Y%m%d%H%M%S')}.docx"
+                    file_path = os.path.join(app.config['GENERATED_FOLDER'], file_name)
+                    doc.save(file_path)
+                    lois.append(file_name)
+                except Exception as e:
+                    continue
+
+        return jsonify({
+            'success': True,
+            'loisGenerated': lois,
+            'highPotentialCount': int(properties_df['High Potential'].sum())
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-
-
