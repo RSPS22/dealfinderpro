@@ -21,15 +21,14 @@ def safe_float(val):
         return np.nan
 
 def calculate_arv(comps_df):
-    # Normalize column names
-    normalized_cols = {col.strip().lower().replace(" ", ""): col for col in comps_df.columns}
-
-    price_aliases = ['lastsaleamount', 'saleamount', 'soldprice']
-    sqft_aliases = ['livingarea', 'sqft', 'squarefeet', 'sqftgla']
-
-    price_col = next((normalized_cols[col] for col in price_aliases if col in normalized_cols), None)
-    sqft_col = next((normalized_cols[col] for col in sqft_aliases if col in normalized_cols), None)
-
+    price_col = next(
+        (col for col in comps_df.columns if col.strip().lower() in ['last sale amount', 'sale amount', 'sold price', 'saleprice', 'price']),
+        None
+    )
+    sqft_col = next(
+        (col for col in comps_df.columns if col.strip().lower() in ['living area', 'sq ft', 'sqft', 'square feet', 'living square feet']),
+        None
+    )
     if not price_col or not sqft_col:
         raise ValueError("Missing required columns in comps file.")
 
@@ -37,7 +36,6 @@ def calculate_arv(comps_df):
     valid_comps = comps_df[comps_df['$/sqft'].notna()]
     if valid_comps.empty:
         return 0, 0
-
     avg_price_per_sqft = valid_comps['$/sqft'].mean()
     return avg_price_per_sqft, len(valid_comps)
 
@@ -130,3 +128,4 @@ def download_loi(filename):
 
 if __name__ == '__main__':
     app.run(debug=True)
+
