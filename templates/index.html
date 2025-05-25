@@ -1,168 +1,130 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Deal Finder Pro</title>
-  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
-    h2 { margin-bottom: 10px; }
-    label { display: block; margin-top: 10px; font-weight: bold; }
-    input[type="text"], input[type="email"] { width: 300px; padding: 5px; margin-top: 3px; }
-    input[type="file"] { margin-top: 5px; }
-    button { margin-top: 15px; padding: 10px 20px; background-color: #2d89ef; color: white; border: none; cursor: pointer; }
-    button:hover { background-color: #1b5fbd; }
-    table { border-collapse: collapse; width: 100%; margin-top: 30px; background: white; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
-    th { background-color: #333; color: white; cursor: pointer; position: sticky; top: 0; z-index: 1; }
-    tr:nth-child(even) { background-color: #f2f2f2; }
-    .high-potential { background-color: #c4f0c5 !important; }
-    .sticky-left { position: sticky; left: 0; background: white; z-index: 2; }
-    .sticky-left-2 { position: sticky; left: 100px; background: white; z-index: 2; }
-    #progressBar { width: 100%; background-color: #ddd; height: 20px; display: none; margin-top: 10px; }
-    #progressBarFill { height: 100%; width: 0%; background-color: #4CAF50; text-align: center; color: white; }
-    .dashboard-link { margin-top: 20px; display: inline-block; }
-  </style>
-</head>
-<body>
-  <h2>Deal Finder Pro</h2>
+from flask import Flask, render_template, request, jsonify, send_from_directory
+import os
+import pandas as pd
+import numpy as np
+from docx import Document
+from datetime import datetime
 
-  <form id="uploadForm" enctype="multipart/form-data">
-    <label for="propertyFile">Property File:</label>
-    <input type="file" name="propertyFile" required>
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['GENERATED_FOLDER'] = 'generated_lois'
 
-    <label for="compsFile">Comps File:</label>
-    <input type="file" name="compsFile" required>
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['GENERATED_FOLDER'], exist_ok=True)
 
-    <label for="businessName">Business Name:</label>
-    <input type="text" name="businessName">
+# ---------- Utility Functions ----------
 
-    <label for="userName">User Name:</label>
-    <input type="text" name="userName">
+def safe_float(val):
+    try:
+        return float(str(val).replace(',', '').replace('$', ''))
+    except:
+        return np.nan
 
-    <label for="userEmail">User Email:</label>
-    <input type="email" name="userEmail">
+def calculate_arv(comps_df):
+    # Handle column inconsistencies
+    price_col = next((col for col in comps_df.columns if col.strip().lower() in ['last sale amount', 'sale amount', 'sold price']), None)
+    sqft_col = next((col for col in comps_df.columns if col.strip().lower() in ['living area', 'sq ft', 'sqft', 'square feet']), None)
 
-    <button type="submit">Upload</button>
+    if not price_col or not sqft_col:
+        raise ValueError("Missing required columns in comps file.")
 
-    <div id="progressBar"><div id="progressBarFill">0%</div></div>
-  </form>
+    comps_df['$/sqft'] = comps_df[price_col].apply(safe_float) / comps_df[sqft_col].apply(safe_float)
+    valid_comps = comps_df[comps_df['$/sqft'].notna()]
+    if valid_comps.empty:
+        return 0, 0
+    avg_price_per_sqft = valid_comps['$/sqft'].mean()
+    return avg_price_per_sqft, len(valid_comps)
 
-  <a href="/dashboard" class="dashboard-link">→ View Dashboard</a>
+def generate_loi(property_row, business_name, user_name, user_email):
+    template_path = 'Offer_Sheet_Template.docx'
+    doc = Document(template_path)
 
-  <div id="tableContainer"></div>
+    def replace_placeholder(paragraphs, key, value):
+        for para in paragraphs:
+            if key in para.text:
+                inline = para.runs
+                for i in range(len(inline)):
+                    if key in inline[i].text:
+                        inline[i].text = inline[i].text.replace(key, value)
 
-  <script>
-    function formatCurrency(value) {
-      if (value === '' || value === null) return 'N/A';
-      return '$' + parseFloat(value).toLocaleString('en-US', { minimumFractionDigits: 0 });
-    }
+    offer_price = property_row.get("Offer Price", "")
+    address = property_row.get("Address", "")
+    date_today = datetime.now().strftime("%B %d, %Y")
 
-    function generateTable(data) {
-      if (!data || data.length === 0) return;
+    replace_placeholder(doc.paragraphs, "{{BUSINESS_NAME}}", business_name or "—")
+    replace_placeholder(doc.paragraphs, "{{USER_NAME}}", user_name or "—")
+    replace_placeholder(doc.paragraphs, "{{USER_EMAIL}}", user_email or "—")
+    replace_placeholder(doc.paragraphs, "{{DATE}}", date_today)
+    replace_placeholder(doc.paragraphs, "{{OFFER_PRICE}}", f"${offer_price:,.0f}" if pd.notna(offer_price) else "N/A")
+    replace_placeholder(doc.paragraphs, "{{PROPERTY_ADDRESS}}", address or "—")
 
-      let table = '<table><thead><tr>';
-      const keys = Object.keys(data[0]);
-      keys.forEach((key, i) => {
-        const sticky = i === 0 ? ' class="sticky-left"' : i === 1 ? ' class="sticky-left-2"' : '';
-        table += `<th${sticky} onclick="sortTable(${i})">${key}</th>`;
-      });
-      table += '</tr></thead><tbody>';
+    filename = f"{address.replace(' ', '_')}_LOI.docx"
+    file_path = os.path.join(app.config['GENERATED_FOLDER'], filename)
+    doc.save(file_path)
+    return filename
 
-      let stats = {
-        uploaded: data.length,
-        highPotential: 0,
-        loisSent: 0,
-        followUps: 0
-      };
+# ---------- Routes ----------
 
-      data.forEach(row => {
-        const isHighPotential = row["High Potential"] === true || row["High Potential"] === "TRUE";
-        const rowClass = isHighPotential ? ' class="high-potential"' : '';
-        table += `<tr${rowClass}>`;
-        keys.forEach(key => {
-          let value = row[key];
-          if (["Listing Price", "ARV", "Offer Price"].includes(key)) {
-            value = formatCurrency(value);
-          }
-          table += `<td>${value !== undefined ? value : ''}</td>`;
-        });
-        table += '</tr>';
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-        if (isHighPotential) stats.highPotential++;
-        if (row["LOI Sent"]) stats.loisSent++;
-        if (row["Follow-Up Sent"]) stats.followUps++;
-      });
+@app.route('/dashboard')
+def dashboard():
+    return render_template('dashboard.html')
 
-      table += '</tbody></table>';
-      document.getElementById('tableContainer').innerHTML = table;
-      localStorage.setItem('dealFinderStats', JSON.stringify({ ...stats }));
-    }
+@app.route('/upload', methods=['POST'])
+def upload():
+    prop_file = request.files.get('propertyFile')
+    comps_file = request.files.get('compsFile')
+    business_name = request.form.get('businessName', '')
+    user_name = request.form.get('userName', '')
+    user_email = request.form.get('userEmail', '')
 
-    function sortTable(colIndex) {
-      const table = document.querySelector("table");
-      let switching = true, shouldSwitch, rows, x, y, i, dir = "asc", switchcount = 0;
-      while (switching) {
-        switching = false;
-        rows = table.rows;
-        for (i = 1; i < rows.length - 1; i++) {
-          shouldSwitch = false;
-          x = rows[i].getElementsByTagName("TD")[colIndex];
-          y = rows[i + 1].getElementsByTagName("TD")[colIndex];
-          const xContent = x.innerHTML.toLowerCase();
-          const yContent = y.innerHTML.toLowerCase();
-          if ((dir === "asc" && xContent > yContent) || (dir === "desc" && xContent < yContent)) {
-            shouldSwitch = true;
-            break;
-          }
-        }
-        if (shouldSwitch) {
-          rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
-          switching = true;
-          switchcount++;
-        } else {
-          if (switchcount === 0 && dir === "asc") {
-            dir = "desc";
-            switching = true;
-          }
-        }
-      }
-    }
+    if not prop_file or not comps_file:
+        return jsonify({'error': 'Missing required files'}), 400
 
-    $('#uploadForm').on('submit', function (e) {
-      e.preventDefault();
-      $('#progressBar').show();
-      $('#progressBarFill').css('width', '0%').text('0%');
-      const formData = new FormData(this);
-      $.ajax({
-        xhr: function () {
-          const xhr = new window.XMLHttpRequest();
-          xhr.upload.addEventListener("progress", function (evt) {
-            if (evt.lengthComputable) {
-              const percentComplete = Math.round((evt.loaded / evt.total) * 100);
-              $('#progressBarFill').css('width', percentComplete + '%').text(percentComplete + '%');
-            }
-          }, false);
-          return xhr;
-        },
-        type: 'POST',
-        url: '/upload',
-        data: formData,
-        processData: false,
-        contentType: false,
-        success: function (response) {
-          $('#progressBar').hide();
-          generateTable(response.data);
-        },
-        error: function () {
-          $('#progressBar').hide();
-          alert('Upload failed. Please try again.');
-        }
-      });
-    });
-  </script>
-</body>
-</html>
+    prop_path = os.path.join(app.config['UPLOAD_FOLDER'], prop_file.filename)
+    comps_path = os.path.join(app.config['UPLOAD_FOLDER'], comps_file.filename)
+    prop_file.save(prop_path)
+    comps_file.save(comps_path)
+
+    props_df = pd.read_csv(prop_path)
+    comps_df = pd.read_csv(comps_path)
+
+    avg_price_per_sqft, comps_count = calculate_arv(comps_df)
+
+    props_df['Condition Estimate'] = props_df.get('Condition Override', 'Medium').fillna('Medium')
+    props_df['ARV'] = props_df['Living Square Feet'].apply(safe_float) * avg_price_per_sqft
+    props_df['Offer Price'] = props_df['ARV'] * 0.60
+    props_df['High Potential'] = props_df['Offer Price'] <= (props_df['ARV'] * 0.55)
+
+    props_df['LOI File'] = props_df.apply(lambda row: generate_loi(row, business_name, user_name, user_email), axis=1)
+    props_df['Comps Count'] = comps_count
+    props_df['Avg Comp $/Sqft'] = round(avg_price_per_sqft, 2)
+    props_df['LOI Sent'] = False
+    props_df['Follow-Up Sent'] = False
+
+    props_df.fillna('', inplace=True)
+
+    columns_to_return = [
+        'Address', 'City', 'State', 'Zip', 'Listing Price', 'Living Square Feet',
+        'Condition Estimate', 'Condition Override', 'ARV', 'Offer Price', 'High Potential',
+        'LOI File', 'LOI Sent', 'Follow-Up Sent', 'Comps Count', 'Avg Comp $/Sqft',
+        'Listing Agent First Name', 'Listing Agent Last Name', 'Listing Agent Email', 'Listing Agent Phone'
+    ]
+    filtered_df = props_df[[col for col in columns_to_return if col in props_df.columns]]
+    data = filtered_df.to_dict(orient='records')
+
+    return jsonify({'data': data})
+
+@app.route('/download_loi/<filename>')
+def download_loi(filename):
+    return send_from_directory(app.config['GENERATED_FOLDER'], filename, as_attachment=True)
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
 
 
 
