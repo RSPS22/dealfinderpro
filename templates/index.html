@@ -1,75 +1,51 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Deal Finder Pro</title>
+    <title>Deal Finder</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            padding: 30px;
-        }
-        input[type="file"], input[type="text"], button {
-            margin: 10px 0;
-        }
-        #status {
-            margin-top: 20px;
-            font-weight: bold;
-        }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background: #f2f2f2; }
+        .high { background-color: #d1ffd1; }
     </style>
 </head>
 <body>
-    <h1>Deal Finder Pro</h1>
-
-    <form id="uploadForm">
-        <label>Property File:</label><br>
-        <input type="file" name="propertyFile" required><br>
-
-        <label>Comps File:</label><br>
-        <input type="file" name="compsFile" required><br>
-
-        <label>Business Name (optional):</label><br>
-        <input type="text" name="businessName"><br>
-
-        <label>User Name (optional):</label><br>
-        <input type="text" name="userName"><br>
-
-        <label>User Email (optional):</label><br>
-        <input type="text" name="userEmail"><br>
-
+    <h1>Deal Finder</h1>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+        <input type="file" name="propertyFile" required>
         <button type="submit">Upload</button>
     </form>
-
-    <div id="status"></div>
-
-    <script>
-        const form = document.getElementById('uploadForm');
-        const statusDiv = document.getElementById('status');
-
-        form.addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const formData = new FormData(form);
-
-            try {
-                statusDiv.textContent = 'Uploading...';
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const result = await response.json();
-                if (response.ok) {
-                    statusDiv.textContent = 'Upload successful. Data processed.';
-                    console.log(result);
-                } else {
-                    statusDiv.textContent = `Upload failed: ${result.error}`;
-                }
-            } catch (error) {
-                statusDiv.textContent = `Error: ${error.message}`;
-            }
-        });
-    </script>
+    <br>
+    <a href="/dashboard">View Dashboard</a>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th><th>Address</th><th>ARV</th><th>Offer Price</th><th>High Potential</th>
+                <th>LOI Sent</th><th>Follow-Up Sent</th><th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in properties %}
+            <tr class="{{ 'high' if p['High Potential'] == 'Yes' else '' }}">
+                <td>{{ loop.index0 }}</td>
+                <td>{{ p['Address'] }}</td>
+                <td>{{ p['ARV'] }}</td>
+                <td>{{ p['Offer Price'] }}</td>
+                <td>{{ p['High Potential'] }}</td>
+                <td>{{ '✅' if p['LOI Sent'] else '❌' }}</td>
+                <td>{{ '✅' if p['Follow-Up Sent'] else '❌' }}</td>
+                <td>
+                    <form method="post" action="/generate_loi/{{ loop.index0 }}">
+                        <button type="submit">Generate LOI</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 </body>
 </html>
+
 
 
 
