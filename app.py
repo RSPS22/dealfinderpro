@@ -1,104 +1,127 @@
+from flask import Flask, render_template, request, jsonify, send_from_directory
 import os
 import pandas as pd
-from flask import Flask, render_template, request, send_file, redirect, url_for, session, jsonify
-from werkzeug.utils import secure_filename
+import numpy as np
 from docx import Document
 from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['GENERATED_FOLDER'] = 'generated_lois'
 
-UPLOAD_FOLDER = 'uploads'
-GENERATED_FOLDER = 'generated_lois'
-TEMPLATE_PATH = 'Offer_Sheet_Template.docx'
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['GENERATED_FOLDER'], exist_ok=True)
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(GENERATED_FOLDER, exist_ok=True)
+# ---------- Utility Functions ----------
+
+def safe_float(val):
+    try:
+        return float(str(val).replace(',', '').replace('$', ''))
+    except:
+        return np.nan
+
+def calculate_arv(comps_df):
+    if 'Living Area' not in comps_df.columns or 'Last Sale Amount' not in comps_df.columns:
+        raise ValueError("Missing required columns in comps file.")
+    comps_df['$/sqft'] = comps_df['Last Sale Amount'].apply(safe_float) / comps_df['Living Area'].apply(safe_float)
+    valid_comps = comps_df[comps_df['$/sqft'].notna()]
+    if valid_comps.empty:
+        return 0, 0
+    avg_price_per_sqft = valid_comps['$/sqft'].mean()
+    return avg_price_per_sqft, len(valid_comps)
+
+def generate_loi(property_row, business_name, user_name, user_email):
+    template_path = 'Offer_Sheet_Template.docx'
+    doc = Document(template_path)
+
+    def replace_placeholder(paragraphs, key, value):
+        for para in paragraphs:
+            if key in para.text:
+                inline = para.runs
+                for i in range(len(inline)):
+                    if key in inline[i].text:
+                        inline[i].text = inline[i].text.replace(key, value)
+
+    offer_price = property_row.get("Offer Price", "")
+    address = property_row.get("Address", "")
+    date_today = datetime.now().strftime("%B %d, %Y")
+
+    replace_placeholder(doc.paragraphs, "{{BUSINESS_NAME}}", business_name or "—")
+    replace_placeholder(doc.paragraphs, "{{USER_NAME}}", user_name or "—")
+    replace_placeholder(doc.paragraphs, "{{USER_EMAIL}}", user_email or "—")
+    replace_placeholder(doc.paragraphs, "{{DATE}}", date_today)
+    replace_placeholder(doc.paragraphs, "{{OFFER_PRICE}}", f"${offer_price:,.0f}" if pd.notna(offer_price) else "N/A")
+    replace_placeholder(doc.paragraphs, "{{PROPERTY_ADDRESS}}", address or "—")
+
+    filename = f"{address.replace(' ', '_')}_LOI.docx"
+    file_path = os.path.join(app.config['GENERATED_FOLDER'], filename)
+    doc.save(file_path)
+    return filename
+
+# ---------- Routes ----------
 
 @app.route('/')
 def index():
-    props = session.get('properties', [])
-    return render_template('index.html', properties=props)
+    return render_template('index.html')
 
 @app.route('/dashboard')
 def dashboard():
-    props = session.get('properties', [])
-    total = len(props)
-    high_potential = sum(1 for p in props if p.get('High Potential') == 'Yes')
-    loi_sent = sum(1 for p in props if p.get('LOI Sent') == True)
-    followup_sent = sum(1 for p in props if p.get('Follow-Up Sent') == True)
-    return render_template('dashboard.html', total=total, high_potential=high_potential,
-                           loi_sent=loi_sent, followup_sent=followup_sent)
+    return render_template('dashboard.html')
 
 @app.route('/upload', methods=['POST'])
 def upload():
     prop_file = request.files.get('propertyFile')
-    if not prop_file:
-        return 'No property file provided', 400
+    comps_file = request.files.get('compsFile')
+    business_name = request.form.get('businessName', '')
+    user_name = request.form.get('userName', '')
+    user_email = request.form.get('userEmail', '')
 
-    prop_filename = secure_filename(prop_file.filename)
-    prop_path = os.path.join(UPLOAD_FOLDER, prop_filename)
+    if not prop_file or not comps_file:
+        return jsonify({'error': 'Missing required files'}), 400
+
+    prop_path = os.path.join(app.config['UPLOAD_FOLDER'], prop_file.filename)
+    comps_path = os.path.join(app.config['UPLOAD_FOLDER'], comps_file.filename)
     prop_file.save(prop_path)
+    comps_file.save(comps_path)
 
-    try:
-        props_df = pd.read_csv(prop_path)
-        props_df.fillna('', inplace=True)
+    props_df = pd.read_csv(prop_path)
+    comps_df = pd.read_csv(comps_path)
 
-        # Add columns if not present
-        for col in ['LOI Sent', 'Follow-Up Sent', 'High Potential']:
-            if col not in props_df.columns:
-                props_df[col] = False if col != 'High Potential' else ''
+    price_col = 'Last Sale Amount'
+    sqft_col = 'Living Area'
+    avg_price_per_sqft, comps_count = calculate_arv(comps_df)
 
-        # Determine high potential (Offer Price <= 55% of ARV)
-        def flag_high(row):
-            try:
-                return 'Yes' if float(row.get('Offer Price', 0)) <= 0.55 * float(row.get('ARV', 0)) else 'No'
-            except:
-                return 'No'
+    props_df['Condition Estimate'] = props_df.get('Condition Override', 'Medium').fillna('Medium')
+    props_df['ARV'] = props_df['Living Square Feet'].apply(safe_float) * avg_price_per_sqft
+    props_df['Offer Price'] = props_df['ARV'] * 0.60
+    props_df['High Potential'] = props_df['Offer Price'] <= (props_df['ARV'] * 0.55)
 
-        props_df['High Potential'] = props_df.apply(flag_high, axis=1)
-        session['properties'] = props_df.to_dict(orient='records')
-        return redirect(url_for('index'))
+    props_df['LOI File'] = props_df.apply(lambda row: generate_loi(row, business_name, user_name, user_email), axis=1)
+    props_df['Comps Count'] = comps_count
+    props_df['Avg Comp $/Sqft'] = round(avg_price_per_sqft, 2)
+    props_df['LOI Sent'] = False
+    props_df['Follow-Up Sent'] = False
 
-    except Exception as e:
-        return f"Error processing file: {e}", 500
+    props_df.fillna('', inplace=True)
 
-@app.route('/generate_loi/<int:prop_id>', methods=['POST'])
-def generate_loi(prop_id):
-    props = session.get('properties', [])
-    if 0 <= prop_id < len(props):
-        prop = props[prop_id]
-        doc = Document(TEMPLATE_PATH)
+    columns_to_return = [
+        'Address', 'City', 'State', 'Zip', 'Listing Price', 'Living Square Feet',
+        'Condition Estimate', 'Condition Override', 'ARV', 'Offer Price', 'High Potential',
+        'LOI File', 'LOI Sent', 'Follow-Up Sent', 'Comps Count', 'Avg Comp $/Sqft',
+        'Listing Agent First Name', 'Listing Agent Last Name', 'Listing Agent Email', 'Listing Agent Phone'
+    ]
+    filtered_df = props_df[[col for col in columns_to_return if col in props_df.columns]]
+    data = filtered_df.to_dict(orient='records')
 
-        # Replace placeholders
-        for p in doc.paragraphs:
-            for key, val in prop.items():
-                placeholder = f'{{{{{key}}}}}'
-                if placeholder in p.text:
-                    p.text = p.text.replace(placeholder, str(val))
+    return jsonify({'data': data})
 
-        filename = f"LOI_{prop.get('Address', 'Property')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.docx"
-        filepath = os.path.join(GENERATED_FOLDER, filename)
-        doc.save(filepath)
-
-        props[prop_id]['LOI Sent'] = True
-        session['properties'] = props
-        return send_file(filepath, as_attachment=True)
-
-    return "Invalid property index", 400
-
-@app.route('/update_status/<int:prop_id>', methods=['POST'])
-def update_status(prop_id):
-    status_type = request.form.get('type')
-    props = session.get('properties', [])
-    if 0 <= prop_id < len(props) and status_type in ['LOI Sent', 'Follow-Up Sent']:
-        props[prop_id][status_type] = True
-        session['properties'] = props
-        return jsonify(success=True)
-    return jsonify(success=False)
+@app.route('/download_loi/<filename>')
+def download_loi(filename):
+    return send_from_directory(app.config['GENERATED_FOLDER'], filename, as_attachment=True)
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
 
