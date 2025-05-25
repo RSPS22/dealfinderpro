@@ -1,50 +1,169 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Deal Finder</title>
-    <style>
-        table { width: 100%; border-collapse: collapse; }
-        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-        th { background: #f2f2f2; }
-        .high { background-color: #d1ffd1; }
-    </style>
+  <meta charset="UTF-8">
+  <title>Deal Finder Pro</title>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
+    h2 { margin-bottom: 10px; }
+    label { display: block; margin-top: 10px; font-weight: bold; }
+    input[type="text"], input[type="email"] { width: 300px; padding: 5px; margin-top: 3px; }
+    input[type="file"] { margin-top: 5px; }
+    button { margin-top: 15px; padding: 10px 20px; background-color: #2d89ef; color: white; border: none; cursor: pointer; }
+    button:hover { background-color: #1b5fbd; }
+    table { border-collapse: collapse; width: 100%; margin-top: 30px; background: white; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+    th { background-color: #333; color: white; cursor: pointer; position: sticky; top: 0; z-index: 1; }
+    tr:nth-child(even) { background-color: #f2f2f2; }
+    .high-potential { background-color: #c4f0c5 !important; }
+    .sticky-left { position: sticky; left: 0; background: white; z-index: 2; }
+    .sticky-left-2 { position: sticky; left: 100px; background: white; z-index: 2; }
+    #progressBar { width: 100%; background-color: #ddd; height: 20px; display: none; margin-top: 10px; }
+    #progressBarFill { height: 100%; width: 0%; background-color: #4CAF50; text-align: center; color: white; }
+    .dashboard-link { margin-top: 20px; display: inline-block; }
+  </style>
 </head>
 <body>
-    <h1>Deal Finder</h1>
-    <form action="/upload" method="post" enctype="multipart/form-data">
-        <input type="file" name="propertyFile" required>
-        <button type="submit">Upload</button>
-    </form>
-    <br>
-    <a href="/dashboard">View Dashboard</a>
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th><th>Address</th><th>ARV</th><th>Offer Price</th><th>High Potential</th>
-                <th>LOI Sent</th><th>Follow-Up Sent</th><th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for p in properties %}
-            <tr class="{{ 'high' if p['High Potential'] == 'Yes' else '' }}">
-                <td>{{ loop.index0 }}</td>
-                <td>{{ p['Address'] }}</td>
-                <td>{{ p['ARV'] }}</td>
-                <td>{{ p['Offer Price'] }}</td>
-                <td>{{ p['High Potential'] }}</td>
-                <td>{{ '✅' if p['LOI Sent'] else '❌' }}</td>
-                <td>{{ '✅' if p['Follow-Up Sent'] else '❌' }}</td>
-                <td>
-                    <form method="post" action="/generate_loi/{{ loop.index0 }}">
-                        <button type="submit">Generate LOI</button>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+  <h2>Deal Finder Pro</h2>
+
+  <form id="uploadForm" enctype="multipart/form-data">
+    <label for="propertyFile">Property File:</label>
+    <input type="file" name="propertyFile" required>
+
+    <label for="compsFile">Comps File:</label>
+    <input type="file" name="compsFile" required>
+
+    <label for="businessName">Business Name:</label>
+    <input type="text" name="businessName">
+
+    <label for="userName">User Name:</label>
+    <input type="text" name="userName">
+
+    <label for="userEmail">User Email:</label>
+    <input type="email" name="userEmail">
+
+    <button type="submit">Upload</button>
+
+    <div id="progressBar"><div id="progressBarFill">0%</div></div>
+  </form>
+
+  <a href="/dashboard" class="dashboard-link">→ View Dashboard</a>
+
+  <div id="tableContainer"></div>
+
+  <script>
+    function formatCurrency(value) {
+      if (value === '' || value === null) return 'N/A';
+      return '$' + parseFloat(value).toLocaleString('en-US', { minimumFractionDigits: 0 });
+    }
+
+    function generateTable(data) {
+      if (!data || data.length === 0) return;
+
+      let table = '<table><thead><tr>';
+      const keys = Object.keys(data[0]);
+      keys.forEach((key, i) => {
+        const sticky = i === 0 ? ' class="sticky-left"' : i === 1 ? ' class="sticky-left-2"' : '';
+        table += `<th${sticky} onclick="sortTable(${i})">${key}</th>`;
+      });
+      table += '</tr></thead><tbody>';
+
+      let stats = {
+        uploaded: data.length,
+        highPotential: 0,
+        loisSent: 0,
+        followUps: 0
+      };
+
+      data.forEach(row => {
+        const isHighPotential = row["High Potential"] === true || row["High Potential"] === "TRUE";
+        const rowClass = isHighPotential ? ' class="high-potential"' : '';
+        table += `<tr${rowClass}>`;
+        keys.forEach(key => {
+          let value = row[key];
+          if (["Listing Price", "ARV", "Offer Price"].includes(key)) {
+            value = formatCurrency(value);
+          }
+          table += `<td>${value !== undefined ? value : ''}</td>`;
+        });
+        table += '</tr>';
+
+        if (isHighPotential) stats.highPotential++;
+        if (row["LOI Sent"]) stats.loisSent++;
+        if (row["Follow-Up Sent"]) stats.followUps++;
+      });
+
+      table += '</tbody></table>';
+      document.getElementById('tableContainer').innerHTML = table;
+      localStorage.setItem('dealFinderStats', JSON.stringify({ ...stats }));
+    }
+
+    function sortTable(colIndex) {
+      const table = document.querySelector("table");
+      let switching = true, shouldSwitch, rows, x, y, i, dir = "asc", switchcount = 0;
+      while (switching) {
+        switching = false;
+        rows = table.rows;
+        for (i = 1; i < rows.length - 1; i++) {
+          shouldSwitch = false;
+          x = rows[i].getElementsByTagName("TD")[colIndex];
+          y = rows[i + 1].getElementsByTagName("TD")[colIndex];
+          const xContent = x.innerHTML.toLowerCase();
+          const yContent = y.innerHTML.toLowerCase();
+          if ((dir === "asc" && xContent > yContent) || (dir === "desc" && xContent < yContent)) {
+            shouldSwitch = true;
+            break;
+          }
+        }
+        if (shouldSwitch) {
+          rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+          switching = true;
+          switchcount++;
+        } else {
+          if (switchcount === 0 && dir === "asc") {
+            dir = "desc";
+            switching = true;
+          }
+        }
+      }
+    }
+
+    $('#uploadForm').on('submit', function (e) {
+      e.preventDefault();
+      $('#progressBar').show();
+      $('#progressBarFill').css('width', '0%').text('0%');
+      const formData = new FormData(this);
+      $.ajax({
+        xhr: function () {
+          const xhr = new window.XMLHttpRequest();
+          xhr.upload.addEventListener("progress", function (evt) {
+            if (evt.lengthComputable) {
+              const percentComplete = Math.round((evt.loaded / evt.total) * 100);
+              $('#progressBarFill').css('width', percentComplete + '%').text(percentComplete + '%');
+            }
+          }, false);
+          return xhr;
+        },
+        type: 'POST',
+        url: '/upload',
+        data: formData,
+        processData: false,
+        contentType: false,
+        success: function (response) {
+          $('#progressBar').hide();
+          generateTable(response.data);
+        },
+        error: function () {
+          $('#progressBar').hide();
+          alert('Upload failed. Please try again.');
+        }
+      });
+    });
+  </script>
 </body>
 </html>
+
 
 
 
