@@ -21,9 +21,12 @@ def safe_float(val):
         return np.nan
 
 def calculate_arv(comps_df):
-    if 'Living Area' not in comps_df.columns or 'Last Sale Amount' not in comps_df.columns:
+    # Handle column inconsistencies
+    price_col = next((col for col in comps_df.columns if col.strip().lower() in ['last sale amount', 'sale amount', 'sold price']), None)
+    sqft_col = next((col for col in comps_df.columns if col.strip().lower() in ['living area', 'sq ft', 'sqft', 'square feet']), None)
+    if not price_col or not sqft_col:
         raise ValueError("Missing required columns in comps file.")
-    comps_df['$/sqft'] = comps_df['Last Sale Amount'].apply(safe_float) / comps_df['Living Area'].apply(safe_float)
+    comps_df['$/sqft'] = comps_df[price_col].apply(safe_float) / comps_df[sqft_col].apply(safe_float)
     valid_comps = comps_df[comps_df['$/sqft'].notna()]
     if valid_comps.empty:
         return 0, 0
@@ -87,8 +90,6 @@ def upload():
     props_df = pd.read_csv(prop_path)
     comps_df = pd.read_csv(comps_path)
 
-    price_col = 'Last Sale Amount'
-    sqft_col = 'Living Area'
     avg_price_per_sqft, comps_count = calculate_arv(comps_df)
 
     props_df['Condition Estimate'] = props_df.get('Condition Override', 'Medium').fillna('Medium')
@@ -121,6 +122,7 @@ def download_loi(filename):
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
 
