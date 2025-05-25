@@ -1,103 +1,104 @@
 import os
 import pandas as pd
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, send_file, redirect, url_for, session, jsonify
 from werkzeug.utils import secure_filename
 from docx import Document
 from datetime import datetime
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['LOI_FOLDER'] = 'generated_lois'
+app.secret_key = 'your_secret_key'
 
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-os.makedirs(app.config['LOI_FOLDER'], exist_ok=True)
+UPLOAD_FOLDER = 'uploads'
+GENERATED_FOLDER = 'generated_lois'
+TEMPLATE_PATH = 'Offer_Sheet_Template.docx'
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(GENERATED_FOLDER, exist_ok=True)
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    props = session.get('properties', [])
+    return render_template('index.html', properties=props)
 
 @app.route('/dashboard')
 def dashboard():
-    return render_template('dashboard.html')
+    props = session.get('properties', [])
+    total = len(props)
+    high_potential = sum(1 for p in props if p.get('High Potential') == 'Yes')
+    loi_sent = sum(1 for p in props if p.get('LOI Sent') == True)
+    followup_sent = sum(1 for p in props if p.get('Follow-Up Sent') == True)
+    return render_template('dashboard.html', total=total, high_potential=high_potential,
+                           loi_sent=loi_sent, followup_sent=followup_sent)
 
 @app.route('/upload', methods=['POST'])
 def upload():
-    property_file = request.files.get('propertyFile')
-    comps_file = request.files.get('compsFile')
-    business_name = request.form.get('businessName', '')
-    user_name = request.form.get('userName', '')
-    user_email = request.form.get('userEmail', '')
+    prop_file = request.files.get('propertyFile')
+    if not prop_file:
+        return 'No property file provided', 400
 
-    if not property_file or not comps_file:
-        return jsonify({'error': 'Missing property or comps file.'}), 400
+    prop_filename = secure_filename(prop_file.filename)
+    prop_path = os.path.join(UPLOAD_FOLDER, prop_filename)
+    prop_file.save(prop_path)
 
     try:
-        property_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(property_file.filename))
-        comps_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(comps_file.filename))
-        property_file.save(property_path)
-        comps_file.save(comps_path)
-
-        props_df = pd.read_csv(property_path)
-        comps_df = pd.read_csv(comps_path)
-
-        required_cols = ['Address', 'Listing Price', 'Living Square Feet']
-        comp_required_cols = ['Address', 'Last Sale Amount', 'Living Square Feet']
-
-        if not all(col in comps_df.columns for col in comp_required_cols):
-            return jsonify({'error': 'Missing required columns in comps file.'}), 400
-        if not all(col in props_df.columns for col in required_cols):
-            return jsonify({'error': 'Missing required columns in properties file.'}), 400
-
-        # Clean and prepare comps
-        comps_df['Last Sale Amount'] = comps_df['Last Sale Amount'].replace('[\$,]', '', regex=True).astype(float)
-        comps_df['Living Square Feet'] = comps_df['Living Square Feet'].replace(',', '', regex=True).astype(float)
-        comps_df['$/sqft'] = comps_df['Last Sale Amount'] / comps_df['Living Square Feet']
-        comps_df.dropna(subset=['$/sqft'], inplace=True)
-
-        avg_price_per_sqft = comps_df['$/sqft'].mean()
-        props_df['Living Square Feet'] = props_df['Living Square Feet'].replace(',', '', regex=True).astype(float)
-        props_df['ARV'] = props_df['Living Square Feet'] * avg_price_per_sqft
-        props_df['Offer Price'] = props_df['ARV'] * 0.6
-
-        props_df['High Potential'] = props_df['Offer Price'] <= props_df['Listing Price'] * 0.55
-        props_df['LOI Sent'] = False
-        props_df['Follow-Up Sent'] = False
-
-        # Fill missing columns for display and LOI generation
-        display_columns = ['Address', 'City', 'State', 'Zip Code', 'Listing Price', 'Living Square Feet', 
-                           'ARV', 'Offer Price', 'High Potential', 'LOI Sent', 'Follow-Up Sent']
-        for col in display_columns:
-            if col not in props_df.columns:
-                props_df[col] = ''
-
+        props_df = pd.read_csv(prop_path)
         props_df.fillna('', inplace=True)
 
-        # Generate LOIs
-        template_path = os.path.join('templates', 'Offer_Sheet_Template.docx')
-        for index, row in props_df.iterrows():
-            doc = Document(template_path)
-            for paragraph in doc.paragraphs:
-                if '[Address]' in paragraph.text:
-                    paragraph.text = paragraph.text.replace('[Address]', str(row['Address']))
-                if '[OfferPrice]' in paragraph.text:
-                    paragraph.text = paragraph.text.replace('[OfferPrice]', f"${row['Offer Price']:,.0f}")
-                if '[BusinessName]' in paragraph.text:
-                    paragraph.text = paragraph.text.replace('[BusinessName]', business_name)
-                if '[UserName]' in paragraph.text:
-                    paragraph.text = paragraph.text.replace('[UserName]', user_name)
-                if '[UserEmail]' in paragraph.text:
-                    paragraph.text = paragraph.text.replace('[UserEmail]', user_email)
-            loi_filename = f"LOI_{index}_{secure_filename(str(row['Address']))}.docx"
-            doc.save(os.path.join(app.config['LOI_FOLDER'], loi_filename))
+        # Add columns if not present
+        for col in ['LOI Sent', 'Follow-Up Sent', 'High Potential']:
+            if col not in props_df.columns:
+                props_df[col] = False if col != 'High Potential' else ''
 
-        # Store processed data
-        props_df.to_csv('uploads/processed_properties.csv', index=False)
-        return props_df.to_json(orient='records')
+        # Determine high potential (Offer Price <= 55% of ARV)
+        def flag_high(row):
+            try:
+                return 'Yes' if float(row.get('Offer Price', 0)) <= 0.55 * float(row.get('ARV', 0)) else 'No'
+            except:
+                return 'No'
+
+        props_df['High Potential'] = props_df.apply(flag_high, axis=1)
+        session['properties'] = props_df.to_dict(orient='records')
+        return redirect(url_for('index'))
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return f"Error processing file: {e}", 500
+
+@app.route('/generate_loi/<int:prop_id>', methods=['POST'])
+def generate_loi(prop_id):
+    props = session.get('properties', [])
+    if 0 <= prop_id < len(props):
+        prop = props[prop_id]
+        doc = Document(TEMPLATE_PATH)
+
+        # Replace placeholders
+        for p in doc.paragraphs:
+            for key, val in prop.items():
+                placeholder = f'{{{{{key}}}}}'
+                if placeholder in p.text:
+                    p.text = p.text.replace(placeholder, str(val))
+
+        filename = f"LOI_{prop.get('Address', 'Property')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.docx"
+        filepath = os.path.join(GENERATED_FOLDER, filename)
+        doc.save(filepath)
+
+        props[prop_id]['LOI Sent'] = True
+        session['properties'] = props
+        return send_file(filepath, as_attachment=True)
+
+    return "Invalid property index", 400
+
+@app.route('/update_status/<int:prop_id>', methods=['POST'])
+def update_status(prop_id):
+    status_type = request.form.get('type')
+    props = session.get('properties', [])
+    if 0 <= prop_id < len(props) and status_type in ['LOI Sent', 'Follow-Up Sent']:
+        props[prop_id][status_type] = True
+        session['properties'] = props
+        return jsonify(success=True)
+    return jsonify(success=False)
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
