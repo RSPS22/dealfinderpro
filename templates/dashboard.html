@@ -1,18 +1,104 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Dashboard</title>
+  <meta charset="UTF-8">
+  <title>Deal Finder Dashboard</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 20px;
+    }
+
+    h1 {
+      color: #333;
+    }
+
+    .stats-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .stat-card {
+      background-color: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
+      flex: 1 1 250px;
+      min-width: 200px;
+    }
+
+    .stat-card h3 {
+      margin: 0;
+      font-size: 16px;
+      color: #555;
+    }
+
+    .stat-value {
+      font-size: 28px;
+      font-weight: bold;
+      color: #2d89ef;
+      margin-top: 10px;
+    }
+
+    .back-link {
+      margin-top: 30px;
+      display: inline-block;
+      font-weight: bold;
+      color: #2d89ef;
+      text-decoration: none;
+    }
+
+    .back-link:hover {
+      text-decoration: underline;
+    }
+  </style>
 </head>
 <body>
-    <h1>Dashboard</h1>
-    <ul>
-        <li>Total Uploaded Properties: {{ total }}</li>
-        <li>Total High Potential Deals: {{ high_potential }}</li>
-        <li>Total LOIs Sent: {{ loi_sent }}</li>
-        <li>Total Follow-Ups Sent: {{ followup_sent }}</li>
-    </ul>
-    <a href="/">← Back to Main</a>
+  <h1>📊 Deal Finder Pro – Dashboard</h1>
+
+  <div class="stats-container">
+    <div class="stat-card">
+      <h3>Total Properties Uploaded</h3>
+      <div class="stat-value" id="uploaded">0</div>
+    </div>
+    <div class="stat-card">
+      <h3>High Potential Properties</h3>
+      <div class="stat-value" id="highPotential">0</div>
+    </div>
+    <div class="stat-card">
+      <h3>LOIs Sent</h3>
+      <div class="stat-value" id="loisSent">0</div>
+    </div>
+    <div class="stat-card">
+      <h3>Follow-Ups Sent</h3>
+      <div class="stat-value" id="followUps">0</div>
+    </div>
+    <div class="stat-card">
+      <h3>User Info</h3>
+      <div class="stat-value" id="userInfo">—</div>
+    </div>
+  </div>
+
+  <a href="/" class="back-link">← Back to Main App</a>
+
+  <script>
+    function loadStats() {
+      const stats = JSON.parse(localStorage.getItem('dealFinderStats')) || {};
+      document.getElementById('uploaded').textContent = stats.uploaded || 0;
+      document.getElementById('highPotential').textContent = stats.highPotential || 0;
+      document.getElementById('loisSent').textContent = stats.loisSent || 0;
+      document.getElementById('followUps').textContent = stats.followUps || 0;
+      document.getElementById('userInfo').textContent = stats.user || '—';
+    }
+
+    loadStats();
+  </script>
 </body>
 </html>
+
 
 
