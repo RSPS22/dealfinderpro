@@ -12,6 +12,8 @@ app.config['GENERATED_FOLDER'] = 'generated_lois'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['GENERATED_FOLDER'], exist_ok=True)
 
+# ---------- Utility Functions ----------
+
 def safe_float(val):
     try:
         return float(str(val).replace(',', '').replace('$', ''))
@@ -19,14 +21,23 @@ def safe_float(val):
         return np.nan
 
 def calculate_arv(comps_df):
-    price_col = next((col for col in comps_df.columns if col.strip().lower() in ['last sale amount', 'sale amount', 'sold price']), None)
-    sqft_col = next((col for col in comps_df.columns if col.strip().lower() in ['living area', 'sq ft', 'sqft', 'square feet']), None)
+    # Normalize column names
+    normalized_cols = {col.strip().lower().replace(" ", ""): col for col in comps_df.columns}
+
+    price_aliases = ['lastsaleamount', 'saleamount', 'soldprice']
+    sqft_aliases = ['livingarea', 'sqft', 'squarefeet', 'sqftgla']
+
+    price_col = next((normalized_cols[col] for col in price_aliases if col in normalized_cols), None)
+    sqft_col = next((normalized_cols[col] for col in sqft_aliases if col in normalized_cols), None)
+
     if not price_col or not sqft_col:
         raise ValueError("Missing required columns in comps file.")
+
     comps_df['$/sqft'] = comps_df[price_col].apply(safe_float) / comps_df[sqft_col].apply(safe_float)
     valid_comps = comps_df[comps_df['$/sqft'].notna()]
     if valid_comps.empty:
         return 0, 0
+
     avg_price_per_sqft = valid_comps['$/sqft'].mean()
     return avg_price_per_sqft, len(valid_comps)
 
@@ -57,6 +68,8 @@ def generate_loi(property_row, business_name, user_name, user_email):
     file_path = os.path.join(app.config['GENERATED_FOLDER'], filename)
     doc.save(file_path)
     return filename
+
+# ---------- Routes ----------
 
 @app.route('/')
 def index():
