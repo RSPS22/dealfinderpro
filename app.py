@@ -21,7 +21,6 @@ def safe_float(val):
         return np.nan
 
 def calculate_arv(comps_df):
-    # Handle column inconsistencies
     price_col = next((col for col in comps_df.columns if col.strip().lower() in ['last sale amount', 'sale amount', 'sold price']), None)
     sqft_col = next((col for col in comps_df.columns if col.strip().lower() in ['living area', 'sq ft', 'sqft', 'square feet']), None)
     if not price_col or not sqft_col:
@@ -122,6 +121,7 @@ def download_loi(filename):
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
 
