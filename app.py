@@ -21,11 +21,13 @@ def safe_float(val):
         return np.nan
 
 def calculate_arv(comps_df):
-    print("DEBUG: comps_df.columns =", comps_df.columns.tolist())  # debug line
-    price_col = next((col for col in comps_df.columns if col.strip().lower() in ['last sale amount', 'sold price', 'sale amount']), None)
-    sqft_col = next((col for col in comps_df.columns if col.strip().lower() in ['living area', 'sq ft', 'sqft', 'square feet']), None)
+    # Handle column inconsistencies
+    price_col = next((col for col in comps_df.columns if col.strip().lower() in ['last sale amount', 'sale amount', 'sold price']), None)
+    sqft_col = next((col for col in comps_df.columns if col.strip().lower() in ['living area', 'sq ft', 'sqft', 'square feet', 'living square feet']), None)
+
     if not price_col or not sqft_col:
         raise ValueError("Missing required columns in comps file.")
+
     comps_df['$/sqft'] = comps_df[price_col].apply(safe_float) / comps_df[sqft_col].apply(safe_float)
     valid_comps = comps_df[comps_df['$/sqft'].notna()]
     if valid_comps.empty:
@@ -92,11 +94,9 @@ def upload():
 
     avg_price_per_sqft, comps_count = calculate_arv(comps_df)
 
-    if 'Condition Override' in props_df.columns:
-        props_df['Condition Estimate'] = props_df['Condition Override'].fillna('Medium')
-    else:
-        props_df['Condition Estimate'] = 'Medium'
-
+    if 'Condition Override' not in props_df.columns:
+        props_df['Condition Override'] = 'Medium'
+    props_df['Condition Estimate'] = props_df['Condition Override'].fillna('Medium')
     props_df['ARV'] = props_df['Living Square Feet'].apply(safe_float) * avg_price_per_sqft
     props_df['Offer Price'] = props_df['ARV'] * 0.60
     props_df['High Potential'] = props_df['Offer Price'] <= (props_df['ARV'] * 0.55)
@@ -115,7 +115,6 @@ def upload():
         'LOI File', 'LOI Sent', 'Follow-Up Sent', 'Comps Count', 'Avg Comp $/Sqft',
         'Listing Agent First Name', 'Listing Agent Last Name', 'Listing Agent Email', 'Listing Agent Phone'
     ]
-
     filtered_df = props_df[[col for col in columns_to_return if col in props_df.columns]]
     data = filtered_df.to_dict(orient='records')
 
