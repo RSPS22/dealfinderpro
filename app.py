@@ -12,6 +12,8 @@ app.config['GENERATED_FOLDER'] = 'generated_lois'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['GENERATED_FOLDER'], exist_ok=True)
 
+# ---------- Utility Functions ----------
+
 def safe_float(val):
     try:
         return float(str(val).replace(',', '').replace('$', ''))
@@ -22,6 +24,7 @@ def calculate_arv(comps_df):
     price_col = next((col for col in comps_df.columns if col.strip().lower() in ['last sale amount', 'sale amount', 'sold price']), None)
     sqft_col = next((col for col in comps_df.columns if col.strip().lower() in ['living area', 'sq ft', 'sqft', 'square feet']), None)
     if not price_col or not sqft_col:
+        print("DEBUG: comps_df.columns =", comps_df.columns.tolist())
         raise ValueError("Missing required columns in comps file.")
     comps_df['$/sqft'] = comps_df[price_col].apply(safe_float) / comps_df[sqft_col].apply(safe_float)
     valid_comps = comps_df[comps_df['$/sqft'].notna()]
@@ -33,6 +36,7 @@ def calculate_arv(comps_df):
 def generate_loi(property_row, business_name, user_name, user_email):
     template_path = 'Offer_Sheet_Template.docx'
     doc = Document(template_path)
+
     def replace_placeholder(paragraphs, key, value):
         for para in paragraphs:
             if key in para.text:
@@ -40,19 +44,24 @@ def generate_loi(property_row, business_name, user_name, user_email):
                 for i in range(len(inline)):
                     if key in inline[i].text:
                         inline[i].text = inline[i].text.replace(key, value)
+
     offer_price = property_row.get("Offer Price", "")
     address = property_row.get("Address", "")
     date_today = datetime.now().strftime("%B %d, %Y")
+
     replace_placeholder(doc.paragraphs, "{{BUSINESS_NAME}}", business_name or "—")
     replace_placeholder(doc.paragraphs, "{{USER_NAME}}", user_name or "—")
     replace_placeholder(doc.paragraphs, "{{USER_EMAIL}}", user_email or "—")
     replace_placeholder(doc.paragraphs, "{{DATE}}", date_today)
     replace_placeholder(doc.paragraphs, "{{OFFER_PRICE}}", f"${offer_price:,.0f}" if pd.notna(offer_price) else "N/A")
     replace_placeholder(doc.paragraphs, "{{PROPERTY_ADDRESS}}", address or "—")
+
     filename = f"{address.replace(' ', '_')}_LOI.docx"
     file_path = os.path.join(app.config['GENERATED_FOLDER'], filename)
     doc.save(file_path)
     return filename
+
+# ---------- Routes ----------
 
 @app.route('/')
 def index():
@@ -82,15 +91,18 @@ def upload():
     comps_df = pd.read_csv(comps_path)
 
     avg_price_per_sqft, comps_count = calculate_arv(comps_df)
-    props_df['Condition Estimate'] = props_df['Condition Override'] if 'Condition Override' in props_df.columns else 'Medium'
+
+    props_df['Condition Estimate'] = props_df.get('Condition Override', pd.Series(['Medium'] * len(props_df)))
     props_df['ARV'] = props_df['Living Square Feet'].apply(safe_float) * avg_price_per_sqft
     props_df['Offer Price'] = props_df['ARV'] * 0.60
     props_df['High Potential'] = props_df['Offer Price'] <= (props_df['ARV'] * 0.55)
+
     props_df['LOI File'] = props_df.apply(lambda row: generate_loi(row, business_name, user_name, user_email), axis=1)
     props_df['Comps Count'] = comps_count
     props_df['Avg Comp $/Sqft'] = round(avg_price_per_sqft, 2)
     props_df['LOI Sent'] = False
     props_df['Follow-Up Sent'] = False
+
     props_df.fillna('', inplace=True)
 
     columns_to_return = [
@@ -101,6 +113,7 @@ def upload():
     ]
     filtered_df = props_df[[col for col in columns_to_return if col in props_df.columns]]
     data = filtered_df.to_dict(orient='records')
+
     return jsonify({'data': data})
 
 @app.route('/download_loi/<filename>')
@@ -109,5 +122,6 @@ def download_loi(filename):
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
