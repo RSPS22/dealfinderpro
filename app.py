@@ -21,8 +21,9 @@ def safe_float(val):
         return np.nan
 
 def calculate_arv(comps_df):
+    # Robust matching for price and sqft columns
     price_col = next((col for col in comps_df.columns if col.strip().lower() in ['last sale amount', 'sale amount', 'sold price']), None)
-    sqft_col = next((col for col in comps_df.columns if col.strip().lower() in ['living area', 'sq ft', 'sqft', 'square feet']), None)
+    sqft_col = next((col for col in comps_df.columns if col.strip().lower() in ['living square feet', 'living area', 'sq ft', 'sqft', 'square feet']), None)
     if not price_col or not sqft_col:
         print("DEBUG: comps_df.columns =", comps_df.columns.tolist())
         raise ValueError("Missing required columns in comps file.")
@@ -92,7 +93,7 @@ def upload():
 
     avg_price_per_sqft, comps_count = calculate_arv(comps_df)
 
-    props_df['Condition Estimate'] = props_df.get('Condition Override', pd.Series(['Medium'] * len(props_df)))
+    props_df['Condition Estimate'] = props_df['Condition Override'].fillna('Medium') if 'Condition Override' in props_df.columns else 'Medium'
     props_df['ARV'] = props_df['Living Square Feet'].apply(safe_float) * avg_price_per_sqft
     props_df['Offer Price'] = props_df['ARV'] * 0.60
     props_df['High Potential'] = props_df['Offer Price'] <= (props_df['ARV'] * 0.55)
@@ -122,6 +123,5 @@ def download_loi(filename):
 
 if __name__ == '__main__':
     app.run(debug=True)
-
 
 
