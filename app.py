@@ -21,6 +21,7 @@ def safe_float(val):
         return np.nan
 
 def calculate_arv(comps_df):
+    print("DEBUG: comps_df.columns =", comps_df.columns.tolist())  # debug line
     price_col = next((col for col in comps_df.columns if col.strip().lower() in ['last sale amount', 'sold price', 'sale amount']), None)
     sqft_col = next((col for col in comps_df.columns if col.strip().lower() in ['living area', 'sq ft', 'sqft', 'square feet']), None)
     if not price_col or not sqft_col:
@@ -114,6 +115,7 @@ def upload():
         'LOI File', 'LOI Sent', 'Follow-Up Sent', 'Comps Count', 'Avg Comp $/Sqft',
         'Listing Agent First Name', 'Listing Agent Last Name', 'Listing Agent Email', 'Listing Agent Phone'
     ]
+
     filtered_df = props_df[[col for col in columns_to_return if col in props_df.columns]]
     data = filtered_df.to_dict(orient='records')
 
@@ -125,4 +127,5 @@ def download_loi(filename):
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
