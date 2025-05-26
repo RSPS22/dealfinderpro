@@ -21,17 +21,10 @@ def safe_float(val):
         return np.nan
 
 def calculate_arv(comps_df):
-    price_col = next(
-        (col for col in comps_df.columns if col.strip().lower() in ['last sale amount', 'sale amount', 'sold price', 'saleprice', 'price']),
-        None
-    )
-    sqft_col = next(
-        (col for col in comps_df.columns if col.strip().lower() in ['living area', 'sq ft', 'sqft', 'square feet', 'living square feet']),
-        None
-    )
+    price_col = next((col for col in comps_df.columns if col.strip().lower() in ['last sale amount', 'sold price', 'sale amount']), None)
+    sqft_col = next((col for col in comps_df.columns if col.strip().lower() in ['living area', 'sq ft', 'sqft', 'square feet']), None)
     if not price_col or not sqft_col:
         raise ValueError("Missing required columns in comps file.")
-
     comps_df['$/sqft'] = comps_df[price_col].apply(safe_float) / comps_df[sqft_col].apply(safe_float)
     valid_comps = comps_df[comps_df['$/sqft'].notna()]
     if valid_comps.empty:
@@ -98,7 +91,11 @@ def upload():
 
     avg_price_per_sqft, comps_count = calculate_arv(comps_df)
 
-    props_df['Condition Estimate'] = props_df.get('Condition Override', 'Medium').fillna('Medium')
+    if 'Condition Override' in props_df.columns:
+        props_df['Condition Estimate'] = props_df['Condition Override'].fillna('Medium')
+    else:
+        props_df['Condition Estimate'] = 'Medium'
+
     props_df['ARV'] = props_df['Living Square Feet'].apply(safe_float) * avg_price_per_sqft
     props_df['Offer Price'] = props_df['ARV'] * 0.60
     props_df['High Potential'] = props_df['Offer Price'] <= (props_df['ARV'] * 0.55)
