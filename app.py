@@ -30,11 +30,13 @@ def allowed_file(filename):
 
 def safe_float(val):
     """Safely convert value to float, handling various formats"""
-    if pd.isna(val) or val == '':
+    if pd.isna(val) or val == '' or val is None:
         return np.nan
     try:
         # Remove common formatting characters
         clean_val = str(val).replace(',', '').replace('$', '').replace('%', '').strip()
+        if clean_val == '':
+            return np.nan
         return float(clean_val)
     except (ValueError, TypeError):
         return np.nan
@@ -144,8 +146,8 @@ def generate_loi(property_row, business_name, user_name, user_email):
                         run.text = run.text.replace(key, str(value))
     
     # Get property details with safe defaults
-    offer_price = property_row.get("Offer Price", 0)
-    address = property_row.get("Address", "Unknown Address")
+    offer_price = safe_float(property_row.get("Offer Price", 0))
+    address = str(property_row.get("Address", "Unknown Address"))
     date_today = datetime.now().strftime("%B %d, %Y")
     
     # Replace placeholders
@@ -154,7 +156,7 @@ def generate_loi(property_row, business_name, user_name, user_email):
         "{{USER_NAME}}": user_name or "—",
         "{{USER_EMAIL}}": user_email or "—",
         "{{DATE}}": date_today,
-        "{{OFFER_PRICE}}": f"${offer_price:,.0f}" if pd.notna(offer_price) and offer_price > 0 else "N/A",
+        "{{OFFER_PRICE}}": f"${offer_price:,.0f}" if not pd.isna(offer_price) and offer_price > 0 else "N/A",
         "{{PROPERTY_ADDRESS}}": address or "—"
     }
     
@@ -218,6 +220,8 @@ def upload():
         
         logger.info(f"Properties loaded: {len(props_df)} rows")
         logger.info(f"Comps loaded: {len(comps_df)} rows")
+        logger.info(f"Properties columns: {props_df.columns.tolist()}")
+        logger.info(f"Comps columns: {comps_df.columns.tolist()}")
         
         # Calculate ARV
         avg_price_per_sqft, comps_count = calculate_arv(comps_df)
@@ -227,22 +231,41 @@ def upload():
         
         # Find living square feet column
         sqft_col = None
-        for col in props_df.columns:
-            if 'living square feet' in col.lower() or 'living area' in col.lower() or 'sqft' in col.lower():
-                sqft_col = col
+        sqft_patterns = ['living square feet', 'living area', 'sq ft', 'sqft', 'square feet', 'total sqft']
+        
+        for pattern in sqft_patterns:
+            sqft_col = next((col for col in props_df.columns if pattern in col.strip().lower()), None)
+            if sqft_col:
                 break
         
         if not sqft_col:
-            return jsonify({'error': 'Living square feet column not found in property data'}), 400
+            logger.error(f"Living square feet column not found. Available columns: {props_df.columns.tolist()}")
+            return jsonify({'error': f'Living square feet column not found in property data. Available columns: {props_df.columns.tolist()}'}), 400
         
-        # Calculate property metrics
-        props_df['Condition Estimate'] = props_df.get('Condition Override', 'Medium').fillna('Medium')
+        # Calculate property metrics with proper error handling
+        # Handle Condition Estimate properly
+        if 'Condition Override' in props_df.columns:
+            props_df['Condition Estimate'] = props_df['Condition Override'].fillna('Medium')
+        else:
+            props_df['Condition Estimate'] = 'Medium'
+        
+        # Clean and calculate square footage
         props_df['Living Square Feet Clean'] = props_df[sqft_col].apply(safe_float)
+        
+        # Calculate ARV and Offer Price
         props_df['ARV'] = props_df['Living Square Feet Clean'] * avg_price_per_sqft
         props_df['Offer Price'] = props_df['ARV'] * 0.60  # 60% of ARV
-        props_df['High Potential'] = props_df['Offer Price'] <= (props_df['ARV'] * 0.55)  # 55% or less
         
-        # Generate LOIs
+        # Determine High Potential properties
+        props_df['High Potential'] = (props_df['Offer Price'] <= (props_df['ARV'] * 0.55))  # 55% or less
+        
+        # Add metadata columns
+        props_df['Comps Count'] = comps_count
+        props_df['Avg Comp $/Sqft'] = round(avg_price_per_sqft, 2)
+        props_df['LOI Sent'] = False
+        props_df['Follow-Up Sent'] = False
+        
+        # Generate LOIs for each property
         loi_files = []
         for idx, row in props_df.iterrows():
             try:
@@ -253,28 +276,42 @@ def upload():
                 loi_files.append(f"Error: {str(e)}")
         
         props_df['LOI File'] = loi_files
-        props_df['Comps Count'] = comps_count
-        props_df['Avg Comp $/Sqft'] = round(avg_price_per_sqft, 2)
-        props_df['LOI Sent'] = False
-        props_df['Follow-Up Sent'] = False
         
-        # Clean up data for frontend
+        # Clean up data for frontend - handle NaN values
         props_df = props_df.fillna('')
         
-        # Select columns to return
-        columns_to_return = [
-            'Address', 'City', 'State', 'Zip', 'Listing Price', sqft_col,
-            'Condition Estimate', 'Condition Override', 'ARV', 'Offer Price', 'High Potential',
-            'LOI File', 'LOI Sent', 'Follow-Up Sent', 'Comps Count', 'Avg Comp $/Sqft',
-            'Listing Agent First Name', 'Listing Agent Last Name', 'Listing Agent Email', 'Listing Agent Phone'
-        ]
+        # Select columns to return (ensure they exist)
+        base_columns = ['Address', 'City', 'State', 'Zip']
+        calculated_columns = ['Listing Price', sqft_col, 'Condition Estimate', 'ARV', 'Offer Price', 'High Potential', 
+                            'LOI File', 'LOI Sent', 'Follow-Up Sent', 'Comps Count', 'Avg Comp $/Sqft']
+        optional_columns = ['Condition Override', 'Listing Agent First Name', 'Listing Agent Last Name', 
+                          'Listing Agent Email', 'Listing Agent Phone']
+        
+        columns_to_return = base_columns + calculated_columns + optional_columns
         
         # Filter columns that actually exist
         available_columns = [col for col in columns_to_return if col in props_df.columns]
         filtered_df = props_df[available_columns]
         
         # Convert to JSON-serializable format
-        data = filtered_df.to_dict(orient='records')
+        data = []
+        for _, row in filtered_df.iterrows():
+            row_dict = {}
+            for col in available_columns:
+                value = row[col]
+                # Handle pandas/numpy types
+                if pd.isna(value):
+                    row_dict[col] = ''
+                elif isinstance(value, (np.integer, np.floating)):
+                    if np.isnan(value):
+                        row_dict[col] = ''
+                    else:
+                        row_dict[col] = float(value) if isinstance(value, np.floating) else int(value)
+                elif isinstance(value, np.bool_):
+                    row_dict[col] = bool(value)
+                else:
+                    row_dict[col] = str(value) if value is not None else ''
+            data.append(row_dict)
         
         # Clean up uploaded files
         try:
@@ -283,10 +320,13 @@ def upload():
         except Exception as e:
             logger.warning(f"Could not remove uploaded files: {str(e)}")
         
+        logger.info(f"Successfully processed {len(data)} properties")
         return jsonify({'data': data, 'message': f'Processed {len(data)} properties successfully'})
         
     except Exception as e:
         logger.error(f"Upload error: {str(e)}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         return jsonify({'error': f'Processing failed: {str(e)}'}), 500
 
 @app.route('/download_loi/<filename>')
