@@ -2,83 +2,429 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Deal Finder Pro</title>
-  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
-    h2 { margin-bottom: 10px; }
-    label { display: block; margin-top: 10px; font-weight: bold; }
-    input[type="text"], input[type="email"] { width: 300px; padding: 5px; margin-top: 3px; }
-    input[type="file"] { margin-top: 5px; }
-    button { margin-top: 15px; padding: 10px 20px; background-color: #2d89ef; color: white; border: none; cursor: pointer; }
-    button:hover { background-color: #1b5fbd; }
-    table { border-collapse: collapse; width: 100%; margin-top: 30px; background: white; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
-    th { background-color: #333; color: white; cursor: pointer; position: sticky; top: 0; z-index: 1; }
-    tr:nth-child(even) { background-color: #f2f2f2; }
-    .high-potential { background-color: #c4f0c5 !important; }
-    .sticky-left { position: sticky; left: 0; background: white; z-index: 2; }
-    .sticky-left-2 { position: sticky; left: 100px; background: white; z-index: 2; }
-    #progressBar { width: 100%; background-color: #ddd; height: 20px; display: none; margin-top: 10px; }
-    #progressBarFill { height: 100%; width: 0%; background-color: #4CAF50; text-align: center; color: white; }
-    .dashboard-link { display: inline-block; margin-bottom: 15px; color: #2d89ef; text-decoration: none; }
-    .dashboard-link:hover { text-decoration: underline; }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body { 
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 20px; 
+      background-color: #f8f9fa;
+      color: #333;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    h1 { 
+      color: #2d89ef;
+      margin-bottom: 30px;
+      text-align: center;
+      font-size: 2.5em;
+    }
+    
+    .upload-section {
+      background: #f8f9fa;
+      padding: 25px;
+      border-radius: 8px;
+      margin-bottom: 30px;
+      border: 2px dashed #dee2e6;
+    }
+    
+    .form-row {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    
+    .form-group {
+      flex: 1;
+      min-width: 250px;
+    }
+    
+    label { 
+      display: block; 
+      margin-bottom: 5px; 
+      font-weight: 600;
+      color: #495057;
+    }
+    
+    input[type="text"], 
+    input[type="email"], 
+    input[type="file"] { 
+      width: 100%; 
+      padding: 12px; 
+      border: 2px solid #dee2e6;
+      border-radius: 6px;
+      font-size: 14px;
+      transition: border-color 0.3s ease;
+    }
+    
+    input[type="text"]:focus,
+    input[type="email"]:focus,
+    input[type="file"]:focus {
+      outline: none;
+      border-color: #2d89ef;
+      box-shadow: 0 0 0 3px rgba(45, 137, 239, 0.1);
+    }
+    
+    .file-input-wrapper {
+      position: relative;
+      overflow: hidden;
+      display: inline-block;
+      width: 100%;
+    }
+    
+    .file-input-button {
+      background: #6c757d;
+      color: white;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      width: 100%;
+      text-align: center;
+      transition: background-color 0.3s ease;
+    }
+    
+    .file-input-button:hover {
+      background: #5a6268;
+    }
+    
+    .submit-btn { 
+      background: linear-gradient(135deg, #2d89ef, #1b5fbd);
+      color: white;
+      padding: 15px 40px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(45, 137, 239, 0.3);
+    }
+    
+    .submit-btn:hover { 
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(45, 137, 239, 0.4);
+    }
+    
+    .submit-btn:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+    
+    #progressBar { 
+      width: 100%; 
+      background-color: #e9ecef; 
+      height: 25px; 
+      display: none; 
+      margin-top: 20px;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    #progressBarFill { 
+      height: 100%; 
+      width: 0%; 
+      background: linear-gradient(90deg, #28a745, #20c997);
+      text-align: center; 
+      color: white;
+      font-weight: 600;
+      line-height: 25px;
+      transition: width 0.3s ease;
+    }
+    
+    .dashboard-link { 
+      display: inline-block; 
+      margin-bottom: 20px; 
+      color: #2d89ef; 
+      text-decoration: none;
+      font-weight: 600;
+      padding: 10px 20px;
+      border: 2px solid #2d89ef;
+      border-radius: 6px;
+      transition: all 0.3s ease;
+    }
+    
+    .dashboard-link:hover { 
+      background: #2d89ef;
+      color: white;
+      text-decoration: none;
+    }
+    
+    .table-container {
+      margin-top: 40px;
+      overflow-x: auto;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    table { 
+      border-collapse: collapse; 
+      width: 100%; 
+      background: white;
+      min-width: 800px;
+    }
+    
+    th, td { 
+      border: 1px solid #dee2e6; 
+      padding: 12px 8px; 
+      text-align: left;
+      font-size: 14px;
+    }
+    
+    th { 
+      background: linear-gradient(135deg, #495057, #343a40);
+      color: white; 
+      cursor: pointer; 
+      position: sticky; 
+      top: 0; 
+      z-index: 10;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 12px;
+      letter-spacing: 0.5px;
+    }
+    
+    th:hover {
+      background: linear-gradient(135deg, #343a40, #23272b);
+    }
+    
+    tr:nth-child(even) { 
+      background-color: #f8f9fa; 
+    }
+    
+    tr:hover {
+      background-color: #e3f2fd;
+    }
+    
+    .high-potential { 
+      background: linear-gradient(135deg, #d4edda, #c3e6cb) !important;
+      border-left: 4px solid #28a745;
+    }
+    
+    .sticky-left { 
+      position: sticky; 
+      left: 0; 
+      background: white; 
+      z-index: 5;
+      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+    }
+    
+    .sticky-left-2 { 
+      position: sticky; 
+      left: 200px; 
+      background: white; 
+      z-index: 5;
+      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+    }
+    
+    .error-message {
+      background: #f8d7da;
+      color: #721c24;
+      padding: 15px;
+      border-radius: 6px;
+      margin: 20px 0;
+      border: 1px solid #f5c6cb;
+    }
+    
+    .success-message {
+      background: #d4edda;
+      color: #155724;
+      padding: 15px;
+      border-radius: 6px;
+      margin: 20px 0;
+      border: 1px solid #c3e6cb;
+    }
+    
+    .loading {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid #2d89ef;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .file-info {
+      font-size: 12px;
+      color: #6c757d;
+      margin-top: 5px;
+    }
+    
+    .download-link {
+      color: #2d89ef;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    
+    .download-link:hover {
+      text-decoration: underline;
+    }
+    
+    @media (max-width: 768px) {
+      .form-row {
+        flex-direction: column;
+      }
+      
+      .container {
+        margin: 10px;
+        padding: 20px;
+      }
+      
+      h1 {
+        font-size: 2em;
+      }
+    }
   </style>
 </head>
 <body>
-  <h2>Deal Finder Pro</h2>
+  <div class="container">
+    <h1>Deal Finder Pro</h1>
 
-  <a href="/dashboard" class="dashboard-link">📊 Go to Dashboard</a>
+    <a href="/dashboard" class="dashboard-link">📊 Go to Dashboard</a>
 
-  <form id="uploadForm" enctype="multipart/form-data">
-    <label for="propertyFile">Property File:</label>
-    <input type="file" name="propertyFile" required>
+    <div class="upload-section">
+      <form id="uploadForm" enctype="multipart/form-data">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="propertyFile">Property File (CSV/Excel):</label>
+            <input type="file" name="propertyFile" id="propertyFile" accept=".csv,.xlsx,.xls" required>
+            <div class="file-info">Supported formats: CSV, Excel (.xlsx, .xls)</div>
+          </div>
 
-    <label for="compsFile">Comps File:</label>
-    <input type="file" name="compsFile" required>
+          <div class="form-group">
+            <label for="compsFile">Comps File (CSV/Excel):</label>
+            <input type="file" name="compsFile" id="compsFile" accept=".csv,.xlsx,.xls" required>
+            <div class="file-info">Supported formats: CSV, Excel (.xlsx, .xls)</div>
+          </div>
+        </div>
 
-    <label for="businessName">Business Name:</label>
-    <input type="text" name="businessName">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="businessName">Business Name:</label>
+            <input type="text" name="businessName" id="businessName" placeholder="Enter your business name">
+          </div>
 
-    <label for="userName">User Name:</label>
-    <input type="text" name="userName">
+          <div class="form-group">
+            <label for="userName">Your Name:</label>
+            <input type="text" name="userName" id="userName" placeholder="Enter your full name">
+          </div>
+        </div>
 
-    <label for="userEmail">User Email:</label>
-    <input type="email" name="userEmail">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="userEmail">Your Email:</label>
+            <input type="email" name="userEmail" id="userEmail" placeholder="Enter your email address">
+          </div>
+        </div>
 
-    <button type="submit">Upload</button>
+        <button type="submit" class="submit-btn" id="submitBtn">
+          <span id="submitText">Analyze Properties</span>
+          <span id="submitSpinner" class="spinner" style="display: none;"></span>
+        </button>
 
-    <div id="progressBar"><div id="progressBarFill">0%</div></div>
-  </form>
+        <div id="progressBar">
+          <div id="progressBarFill">0%</div>
+        </div>
+      </form>
+    </div>
 
-  <div id="tableContainer"></div>
+    <div id="messageContainer"></div>
+    <div id="tableContainer" class="table-container"></div>
+  </div>
 
   <script>
+    // Utility functions
     function formatCurrency(value) {
-      if (value === '' || value === null) return 'N/A';
-      return '$' + parseFloat(value).toLocaleString('en-US', { minimumFractionDigits: 0 });
+      if (value === '' || value === null || isNaN(value)) return 'N/A';
+      return '$' + parseFloat(value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    }
+
+    function formatNumber(value) {
+      if (value === '' || value === null || isNaN(value)) return 'N/A';
+      return parseFloat(value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    }
+
+    function showMessage(message, type = 'info') {
+      const container = document.getElementById('messageContainer');
+      const className = type === 'error' ? 'error-message' : 'success-message';
+      container.innerHTML = `<div class="${className}">${message}</div>`;
+      
+      // Auto-hide success messages after 5 seconds
+      if (type === 'success') {
+        setTimeout(() => {
+          container.innerHTML = '';
+        }, 5000);
+      }
     }
 
     function generateTable(data) {
-      if (!data || data.length === 0) return;
+      if (!data || data.length === 0) {
+        document.getElementById('tableContainer').innerHTML = '<p>No data to display.</p>';
+        return;
+      }
 
       let table = '<table><thead><tr>';
       const keys = Object.keys(data[0]);
+      
       keys.forEach((key, i) => {
         const sticky = i === 0 ? ' class="sticky-left"' : i === 1 ? ' class="sticky-left-2"' : '';
-        table += `<th${sticky} onclick="sortTable(${i})">${key}</th>`;
+        table += `<th${sticky} onclick="sortTable(${i})" title="Click to sort">${key}</th>`;
       });
       table += '</tr></thead><tbody>';
 
-      data.forEach(row => {
-        const rowClass = row["High Potential"] === true || row["High Potential"] === "TRUE" ? ' class="high-potential"' : '';
+      data.forEach((row, index) => {
+        const rowClass = (row["High Potential"] === true || row["High Potential"] === "TRUE" || row["High Potential"] === "True") 
+          ? ' class="high-potential"' : '';
         table += `<tr${rowClass}>`;
-        keys.forEach(key => {
+        
+        keys.forEach((key, colIndex) => {
           let value = row[key];
+          const sticky = colIndex === 0 ? ' class="sticky-left"' : colIndex === 1 ? ' class="sticky-left-2"' : '';
+          
+          // Format specific columns
           if (["Listing Price", "ARV", "Offer Price"].includes(key)) {
             value = formatCurrency(value);
+          } else if (key.includes("Square Feet") || key.includes("Sqft")) {
+            value = formatNumber(value);
+          } else if (key === "LOI File" && value && value !== "N/A" && !value.startsWith("Error:")) {
+            value = `<a href="/download_loi/${value}" class="download-link" target="_blank">📄 ${value}</a>`;
+          } else if (key === "High Potential") {
+            value = value === true || value === "TRUE" || value === "True" ? "✅ Yes" : "❌ No";
+          } else if (key === "LOI Sent" || key === "Follow-Up Sent") {
+            value = value === true || value === "TRUE" || value === "True" ? "✅ Yes" : "❌ No";
           }
-          table += `<td>${value !== undefined ? value : ''}</td>`;
+          
+          table += `<td${sticky}>${value !== undefined && value !== null ? value : ''}</td>`;
         });
         table += '</tr>';
       });
@@ -89,21 +435,41 @@
 
     function sortTable(colIndex) {
       const table = document.querySelector("table");
+      if (!table) return;
+      
       let switching = true, shouldSwitch, rows, x, y, i, dir = "asc", switchcount = 0;
+      
       while (switching) {
         switching = false;
         rows = table.rows;
+        
         for (i = 1; i < rows.length - 1; i++) {
           shouldSwitch = false;
           x = rows[i].getElementsByTagName("TD")[colIndex];
           y = rows[i + 1].getElementsByTagName("TD")[colIndex];
-          const xContent = x.innerHTML.toLowerCase();
-          const yContent = y.innerHTML.toLowerCase();
-          if ((dir === "asc" && xContent > yContent) || (dir === "desc" && xContent < yContent)) {
-            shouldSwitch = true;
-            break;
+          
+          if (!x || !y) continue;
+          
+          let xContent = x.innerHTML.toLowerCase().replace(/[^a-z0-9.]/g, '');
+          let yContent = y.innerHTML.toLowerCase().replace(/[^a-z0-9.]/g, '');
+          
+          // Try to parse as numbers for proper numeric sorting
+          const xNum = parseFloat(xContent);
+          const yNum = parseFloat(yContent);
+          
+          if (!isNaN(xNum) && !isNaN(yNum)) {
+            if ((dir === "asc" && xNum > yNum) || (dir === "desc" && xNum < yNum)) {
+              shouldSwitch = true;
+              break;
+            }
+          } else {
+            if ((dir === "asc" && xContent > yContent) || (dir === "desc" && xContent < yContent)) {
+              shouldSwitch = true;
+              break;
+            }
           }
         }
+        
         if (shouldSwitch) {
           rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
           switching = true;
@@ -117,11 +483,24 @@
       }
     }
 
+    // Form submission handler
     $('#uploadForm').on('submit', function (e) {
       e.preventDefault();
+      
+      const submitBtn = $('#submitBtn');
+      const submitText = $('#submitText');
+      const submitSpinner = $('#submitSpinner');
+      
+      // Disable form and show loading state
+      submitBtn.prop('disabled', true);
+      submitText.text('Processing...');
+      submitSpinner.show();
+      
       $('#progressBar').show();
       $('#progressBarFill').css('width', '0%').text('0%');
+      
       const formData = new FormData(this);
+      
       $.ajax({
         xhr: function () {
           const xhr = new window.XMLHttpRequest();
@@ -138,15 +517,85 @@
         data: formData,
         processData: false,
         contentType: false,
+        timeout: 300000, // 5 minute timeout
         success: function (response) {
           $('#progressBar').hide();
-          generateTable(response.data);
+          
+          if (response.data && response.data.length > 0) {
+            generateTable(response.data);
+            
+            // Calculate and store stats
+            const stats = {
+              uploaded: response.data.length,
+              highPotential: response.data.filter(row => 
+                row["High Potential"] === true || 
+                row["High Potential"] === "TRUE" || 
+                row["High Potential"] === "True"
+              ).length,
+              loisSent: response.data.filter(row => 
+                row["LOI Sent"] === true || 
+                row["LOI Sent"] === "TRUE" || 
+                row["LOI Sent"] === "True"
+              ).length,
+              followUps: response.data.filter(row => 
+                row["Follow-Up Sent"] === true || 
+                row["Follow-Up Sent"] === "TRUE" || 
+                row["Follow-Up Sent"] === "True"
+              ).length,
+              user: formData.get('userName') || 'Unknown',
+              lastUpdated: new Date().toISOString()
+            };
+            
+            // Store stats in memory (since localStorage isn't available)
+            window.dealFinderStats = stats;
+            
+            const message = response.message || `Successfully processed ${response.data.length} properties!`;
+            showMessage(message, 'success');
+          } else {
+            showMessage('No data received from server.', 'error');
+          }
         },
-        error: function () {
+        error: function (xhr, status, error) {
           $('#progressBar').hide();
-          alert('Upload failed. Please try again.');
+          
+          let errorMessage = 'Upload failed. Please try again.';
+          
+          if (xhr.responseJSON && xhr.responseJSON.error) {
+            errorMessage = xhr.responseJSON.error;
+          } else if (status === 'timeout') {
+            errorMessage = 'Request timed out. Please try with smaller files or check your connection.';
+          } else if (status === 'error') {
+            errorMessage = `Server error: ${error}`;
+          }
+          
+          showMessage(errorMessage, 'error');
+          console.error('Upload error:', xhr, status, error);
+        },
+        complete: function() {
+          // Reset form state
+          submitBtn.prop('disabled', false);
+          submitText.text('Analyze Properties');
+          submitSpinner.hide();
         }
       });
+    });
+
+    // File input change handlers for better UX
+    $('#propertyFile, #compsFile').on('change', function() {
+      const file = this.files[0];
+      const fileInfo = $(this).siblings('.file-info');
+      
+      if (file) {
+        const fileSize = (file.size / 1024 / 1024).toFixed(2);
+        fileInfo.text(`Selected: ${file.name} (${fileSize} MB)`);
+      } else {
+        fileInfo.text(fileInfo.data('original-text') || 'Supported formats: CSV, Excel (.xlsx, .xls)');
+      }
+    });
+
+    // Store original file info text
+    $('.file-info').each(function() {
+      $(this).data('original-text', $(this).text());
     });
   </script>
 </body>
