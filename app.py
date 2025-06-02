@@ -348,7 +348,12 @@ def download_loi(filename):
 def too_large(e):
     return jsonify({'error': 'File too large. Maximum size is 16MB.'}), 413
 
+# Render deployment configuration
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Get port from environment variable for Render deployment
+    port = int(os.environ.get('PORT', 5000))
+    # Bind to 0.0.0.0 to make it accessible externally
+    # Set debug=False for production
+    app.run(host='0.0.0.0', port=port, debug=False)
 
 
