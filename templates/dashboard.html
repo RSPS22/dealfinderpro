@@ -141,6 +141,12 @@
       transform: translateY(-1px);
     }
     
+    .refresh-btn:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
     .last-updated {
       text-align: center;
       color: #6c757d;
@@ -189,6 +195,50 @@
       color: #28a745;
     }
     
+    .metadata-section {
+      background: #f8f9fa;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 30px;
+      border-left: 4px solid #2d89ef;
+    }
+    
+    .metadata-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+    }
+    
+    .metadata-item {
+      text-align: center;
+    }
+    
+    .metadata-label {
+      font-size: 12px;
+      color: #6c757d;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 5px;
+    }
+    
+    .metadata-value {
+      font-size: 18px;
+      font-weight: 600;
+      color: #495057;
+    }
+    
+    .success-indicator {
+      color: #28a745;
+    }
+    
+    .warning-indicator {
+      color: #ffc107;
+    }
+    
+    .info-indicator {
+      color: #17a2b8;
+    }
+    
     @media (max-width: 768px) {
       .container {
         margin: 10px;
@@ -206,12 +256,22 @@
       .stat-value {
         font-size: 28px;
       }
+      
+      .metadata-grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>📊 Deal Finder Pro Dashboard</h1>
+    
+    <div id="metadataSection" class="metadata-section" style="display: none;">
+      <div class="metadata-grid" id="metadataGrid">
+        <!-- Metadata will be populated here -->
+      </div>
+    </div>
     
     <div id="statsContainer" class="stats-container">
       <!-- Stats will be populated by JavaScript -->
@@ -221,13 +281,25 @@
       <a href="/" class="back-link">
         ← Back to Main App
       </a>
-      <button onclick="refreshStats()" class="refresh-btn">🔄 Refresh</button>
+      <button onclick="refreshStats()" class="refresh-btn" id="refreshBtn">🔄 Refresh</button>
     </div>
     
     <div id="lastUpdated" class="last-updated"></div>
   </div>
 
   <script>
+    // Utility functions
+    function normalizeBoolean(val) {
+      if (val === null || val === undefined || val === '') return false;
+      const strVal = String(val).toLowerCase().trim();
+      return ['true', 'yes', '1', 'y', 't', 'on'].includes(strVal);
+    }
+    
+    function formatCurrency(value) {
+      if (value === null || value === undefined || value === '' || isNaN(value)) return '$0';
+      return '$' + parseFloat(value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    }
+    
     function calculatePerformance(current, total) {
       if (total === 0) return 0;
       return Math.round((current / total) * 100);
@@ -259,19 +331,114 @@
       `;
     }
     
+    function getStatsFromUrl() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const statsParam = urlParams.get('stats');
+      if (statsParam) {
+        try {
+          return JSON.parse(decodeURIComponent(statsParam));
+        } catch (e) {
+          console.warn('Error parsing stats from URL:', e);
+        }
+      }
+      return null;
+    }
+    
+    function getStoredStats() {
+      // Try multiple sources for stats data
+      const sources = [
+        () => window.dealFinderStats,
+        () => window.parent && window.parent.dealFinderStats,
+        () => getStatsFromUrl(),
+        () => {
+          // Try to get from referrer page if available
+          if (document.referrer && document.referrer.includes('localhost')) {
+            return window.opener && window.opener.dealFinderStats;
+          }
+          return null;
+        }
+      ];
+      
+      for (const getStats of sources) {
+        try {
+          const stats = getStats();
+          if (stats && stats.uploaded > 0) {
+            return stats;
+          }
+        } catch (e) {
+          console.warn('Error getting stats from source:', e);
+        }
+      }
+      
+      return null;
+    }
+    
+    function createMetadataSection(stats) {
+      if (!stats.metadata) return '';
+      
+      const metadata = stats.metadata;
+      let metadataHtml = '';
+      
+      if (metadata.avg_price_per_sqft) {
+        metadataHtml += `
+          <div class="metadata-item">
+            <div class="metadata-label">Avg Comp Price/SqFt</div>
+            <div class="metadata-value info-indicator">${formatCurrency(metadata.avg_price_per_sqft)}</div>
+          </div>
+        `;
+      }
+      
+      if (metadata.comps_used) {
+        metadataHtml += `
+          <div class="metadata-item">
+            <div class="metadata-label">Comps Used</div>
+            <div class="metadata-value">${metadata.comps_used}</div>
+          </div>
+        `;
+      }
+      
+      if (metadata.total_properties) {
+        metadataHtml += `
+          <div class="metadata-item">
+            <div class="metadata-label">Total Properties</div>
+            <div class="metadata-value">${metadata.total_properties.toLocaleString()}</div>
+          </div>
+        `;
+      }
+      
+      if (metadata.high_potential_count !== undefined) {
+        const percentage = calculatePerformance(metadata.high_potential_count, metadata.total_properties || stats.uploaded);
+        const indicatorClass = percentage >= 20 ? 'success-indicator' : percentage >= 10 ? 'warning-indicator' : 'info-indicator';
+        
+        metadataHtml += `
+          <div class="metadata-item">
+            <div class="metadata-label">High Potential Rate</div>
+            <div class="metadata-value ${indicatorClass}">${percentage}%</div>
+          </div>
+        `;
+      }
+      
+      return metadataHtml;
+    }
+    
     function loadStats() {
       const statsContainer = document.getElementById('statsContainer');
       const lastUpdatedElement = document.getElementById('lastUpdated');
+      const metadataSection = document.getElementById('metadataSection');
+      const metadataGrid = document.getElementById('metadataGrid');
       
-      // Try to get stats from window (set by main app) or fallback to empty stats
-      const stats = window.dealFinderStats || {
+      // Get stats from various sources
+      const stats = getStoredStats() || {
         uploaded: 0,
         highPotential: 0,
         loisSent: 0,
         followUps: 0,
         user: '—',
-        lastUpdated: null
+        lastUpdated: null,
+        metadata: {}
       };
+      
+      console.log('Loading stats:', stats); // Debug log
       
       if (stats.uploaded === 0) {
         statsContainer.innerHTML = `
@@ -279,10 +446,21 @@
             <div class="no-data-icon">📊</div>
             <h3>No Data Available</h3>
             <p>Upload some properties to see your analytics here!</p>
+            <p style="margin-top: 15px;"><a href="/" style="color: #2d89ef;">← Go back to upload properties</a></p>
           </div>
         `;
         lastUpdatedElement.innerHTML = '';
+        metadataSection.style.display = 'none';
         return;
+      }
+      
+      // Show metadata if available
+      const metadataHtml = createMetadataSection(stats);
+      if (metadataHtml) {
+        metadataGrid.innerHTML = metadataHtml;
+        metadataSection.style.display = 'block';
+      } else {
+        metadataSection.style.display = 'none';
       }
       
       const highPotentialPercentage = calculatePerformance(stats.highPotential, stats.uploaded);
@@ -309,10 +487,8 @@
         ${createStatCard(
           'LOIs Generated', 
           stats.loisSent.toLocaleString(), 
-          `${sentPercentage}% of total properties`,
-          '📄',
-          true,
-          { current: stats.loisSent, total: stats.uploaded }
+          `Ready for download and sending`,
+          '📄'
         )}
         
         ${createStatCard(
@@ -326,7 +502,7 @@
         
         ${createStatCard(
           'Active User', 
-          stats.user, 
+          stats.user || '—', 
           'Current session user',
           '👤'
         )}
@@ -342,38 +518,70 @@
       if (stats.lastUpdated) {
         const updatedDate = new Date(stats.lastUpdated);
         lastUpdatedElement.innerHTML = `Last updated: ${updatedDate.toLocaleString()}`;
+      } else {
+        lastUpdatedElement.innerHTML = '';
       }
     }
     
     function refreshStats() {
-      // In a real app, this would fetch fresh data from the server
-      // For now, just reload the current stats
-      loadStats();
+      const refreshBtn = document.getElementById('refreshBtn');
+      const originalText = refreshBtn.innerHTML;
       
       // Add visual feedback
-      const refreshBtn = document.querySelector('.refresh-btn');
-      const originalText = refreshBtn.innerHTML;
       refreshBtn.innerHTML = '🔄 Refreshing...';
       refreshBtn.disabled = true;
       
+      // Simulate refresh delay and reload stats
       setTimeout(() => {
+        loadStats();
         refreshBtn.innerHTML = originalText;
         refreshBtn.disabled = false;
       }, 1000);
     }
     
+    // Enhanced communication with parent window
+    function setupParentCommunication() {
+      // Listen for messages from parent window
+      window.addEventListener('message', function(event) {
+        if (event.data && event.data.type === 'UPDATE_STATS') {
+          window.dealFinderStats = event.data.stats;
+          loadStats();
+        }
+      });
+      
+      // Request stats from parent if available
+      if (window.parent && window.parent !== window) {
+        try {
+          window.parent.postMessage({ type: 'REQUEST_STATS' }, '*');
+        } catch (e) {
+          console.warn('Could not communicate with parent window:', e);
+        }
+      }
+    }
+    
     // Load stats on page load
-    loadStats();
+    document.addEventListener('DOMContentLoaded', function() {
+      setupParentCommunication();
+      loadStats();
+    });
     
     // Auto-refresh every 30 seconds if there's data
     setInterval(() => {
-      if (window.dealFinderStats && window.dealFinderStats.uploaded > 0) {
+      const stats = getStoredStats();
+      if (stats && stats.uploaded > 0) {
         loadStats();
       }
     }, 30000);
+    
+    // Handle page visibility changes to refresh when returning to tab
+    document.addEventListener('visibilitychange', function() {
+      if (!document.hidden) {
+        const stats = getStoredStats();
+        if (stats && stats.uploaded > 0) {
+          loadStats();
+        }
+      }
+    });
   </script>
 </body>
 </html>
-
-
-
