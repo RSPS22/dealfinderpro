@@ -6,11 +6,18 @@ from docx import Document
 from datetime import datetime
 import logging
 from werkzeug.utils import secure_filename
+from flask_sqlalchemy import SQLAlchemy
+import uuid
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['GENERATED_FOLDER'] = 'generated_lois'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///deals.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize database
+db = SQLAlchemy(app)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +29,44 @@ os.makedirs(app.config['GENERATED_FOLDER'], exist_ok=True)
 
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {'csv', 'xlsx', 'xls'}
+
+# Database Models
+class Property(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.String(36), nullable=False)
+    address = db.Column(db.String(200), nullable=False)
+    city = db.Column(db.String(100))
+    state = db.Column(db.String(50))
+    zip_code = db.Column(db.String(20))
+    listing_price = db.Column(db.Float)
+    living_square_feet = db.Column(db.Integer)
+    condition_estimate = db.Column(db.String(50))
+    arv = db.Column(db.Float)
+    offer_price = db.Column(db.Float)
+    high_potential = db.Column(db.Boolean, default=False)
+    loi_file = db.Column(db.String(200))
+    loi_sent = db.Column(db.Boolean, default=False)
+    follow_up_sent = db.Column(db.Boolean, default=False)
+    comps_count = db.Column(db.Integer)
+    avg_comp_price_sqft = db.Column(db.Float)
+    listing_agent_first_name = db.Column(db.String(100))
+    listing_agent_last_name = db.Column(db.String(100))
+    listing_agent_email = db.Column(db.String(200))
+    listing_agent_phone = db.Column(db.String(50))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Session(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.String(36), unique=True, nullable=False)
+    business_name = db.Column(db.String(200))
+    user_name = db.Column(db.String(100))
+    user_email = db.Column(db.String(200))
+    total_properties = db.Column(db.Integer, default=0)
+    high_potential_count = db.Column(db.Integer, default=0)
+    avg_price_per_sqft = db.Column(db.Float)
+    comps_used = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -224,6 +269,89 @@ def index():
 def dashboard():
     return render_template('dashboard.html')
 
+@app.route('/api/stats')
+def get_stats():
+    """Get current session stats"""
+    try:
+        # Get latest session or return empty stats
+        latest_session = Session.query.order_by(Session.updated_at.desc()).first()
+        
+        if not latest_session:
+            return jsonify({
+                'uploaded': 0,
+                'highPotential': 0,
+                'loisSent': 0,
+                'followUps': 0,
+                'user': '—',
+                'lastUpdated': None,
+                'metadata': {}
+            })
+        
+        # Count follow-ups and LOIs sent for this session
+        properties = Property.query.filter_by(session_id=latest_session.session_id).all()
+        lois_sent = sum(1 for p in properties if p.loi_file and not p.loi_file.startswith('Error:'))
+        follow_ups = sum(1 for p in properties if p.follow_up_sent)
+        
+        return jsonify({
+            'uploaded': latest_session.total_properties,
+            'highPotential': latest_session.high_potential_count,
+            'loisSent': lois_sent,
+            'followUps': follow_ups,
+            'user': latest_session.user_name or latest_session.business_name or '—',
+            'lastUpdated': latest_session.updated_at.isoformat(),
+            'metadata': {
+                'total_properties': latest_session.total_properties,
+                'high_potential_count': latest_session.high_potential_count,
+                'avg_price_per_sqft': latest_session.avg_price_per_sqft,
+                'comps_used': latest_session.comps_used
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Stats error: {str(e)}")
+        return jsonify({'error': 'Failed to fetch stats'}), 500
+
+@app.route('/api/properties')
+def get_properties():
+    """Get properties for the latest session"""
+    try:
+        latest_session = Session.query.order_by(Session.updated_at.desc()).first()
+        if not latest_session:
+            return jsonify({'data': []})
+        
+        properties = Property.query.filter_by(session_id=latest_session.session_id).all()
+        
+        data = []
+        for prop in properties:
+            data.append({
+                'Id': prop.id,
+                'Address': prop.address,
+                'City': prop.city,
+                'State': prop.state,
+                'Zip': prop.zip_code,
+                'Listing Price': prop.listing_price,
+                'Living Square Feet': prop.living_square_feet,
+                'Condition Estimate': prop.condition_estimate,
+                'ARV': prop.arv,
+                'Offer Price': prop.offer_price,
+                'High Potential': prop.high_potential,
+                'LOI File': prop.loi_file,
+                'LOI Sent': prop.loi_sent,
+                'Follow-Up Sent': prop.follow_up_sent,
+                'Comps Count': prop.comps_count,
+                'Avg Comp $/Sqft': prop.avg_comp_price_sqft,
+                'Listing Agent First Name': prop.listing_agent_first_name,
+                'Listing Agent Last Name': prop.listing_agent_last_name,
+                'Listing Agent Email': prop.listing_agent_email,
+                'Listing Agent Phone': prop.listing_agent_phone
+            })
+        
+        return jsonify({'data': data})
+        
+    except Exception as e:
+        logger.error(f"Properties error: {str(e)}")
+        return jsonify({'error': 'Failed to fetch properties'}), 500
+
 @app.route('/upload', methods=['POST'])
 def upload():
     try:
@@ -242,6 +370,9 @@ def upload():
         user_name = request.form.get('userName', '').strip()
         user_email = request.form.get('userEmail', '').strip()
         
+        # Create new session
+        session_id = str(uuid.uuid4())
+        
         # Save uploaded files
         prop_filename = secure_filename(prop_file.filename)
         comps_filename = secure_filename(comps_file.filename)
@@ -258,8 +389,6 @@ def upload():
         
         logger.info(f"Properties loaded: {len(props_df)} rows")
         logger.info(f"Comps loaded: {len(comps_df)} rows")
-        logger.info(f"Properties columns: {props_df.columns.tolist()}")
-        logger.info(f"Comps columns: {comps_df.columns.tolist()}")
         
         # Calculate ARV
         avg_price_per_sqft, comps_count = calculate_arv(comps_df)
@@ -280,82 +409,98 @@ def upload():
             logger.error(f"Living square feet column not found. Available columns: {props_df.columns.tolist()}")
             return jsonify({'error': f'Living square feet column not found in property data. Available columns: {props_df.columns.tolist()}'}), 400
         
-        # Calculate property metrics with proper error handling and normalization
-        # Handle Condition Estimate properly - normalize values
+        # Calculate property metrics
         if 'Condition Override' in props_df.columns:
             props_df['Condition Estimate'] = props_df['Condition Override'].apply(normalize_condition)
         else:
             props_df['Condition Estimate'] = 'Medium'
         
-        # Clean and calculate square footage
         props_df['Living Square Feet Clean'] = props_df[sqft_col].apply(safe_float)
-        
-        # Calculate ARV and Offer Price
         props_df['ARV'] = props_df['Living Square Feet Clean'] * avg_price_per_sqft
-        props_df['Offer Price'] = props_df['ARV'] * 0.60  # 60% of ARV
-        
-        # Determine High Potential properties - normalize to boolean
+        props_df['Offer Price'] = props_df['ARV'] * 0.60
         props_df['High Potential'] = (props_df['Offer Price'] <= (props_df['ARV'] * 0.55)).apply(lambda x: bool(x))
         
-        # Add metadata columns
-        props_df['Comps Count'] = comps_count
-        props_df['Avg Comp $/Sqft'] = round(avg_price_per_sqft, 2)
+        # Generate LOIs and save to database
+        high_potential_count = 0
         
-        # Normalize boolean columns
-        props_df['LOI Sent'] = False
-        props_df['Follow-Up Sent'] = False
-        
-        # Generate LOIs for each property
-        loi_files = []
         for idx, row in props_df.iterrows():
             try:
                 loi_file = generate_loi(row, business_name, user_name, user_email)
-                loi_files.append(loi_file)
             except Exception as e:
                 logger.error(f"Error generating LOI for row {idx}: {str(e)}")
-                loi_files.append(f"Error: {str(e)}")
+                loi_file = f"Error: {str(e)}"
+            
+            # Create Property record
+            property_record = Property(
+                session_id=session_id,
+                address=str(row.get('Address', 'Unknown Address')),
+                city=str(row.get('City', '')),
+                state=str(row.get('State', '')),
+                zip_code=str(row.get('Zip', '')),
+                listing_price=safe_float(row.get('Listing Price')),
+                living_square_feet=int(safe_float(row.get(sqft_col, 0))) if not pd.isna(safe_float(row.get(sqft_col, 0))) else None,
+                condition_estimate=normalize_condition(row.get('Condition Estimate')),
+                arv=safe_float(row.get('ARV')),
+                offer_price=safe_float(row.get('Offer Price')),
+                high_potential=bool(row.get('High Potential', False)),
+                loi_file=loi_file,
+                loi_sent=False,
+                follow_up_sent=False,
+                comps_count=comps_count,
+                avg_comp_price_sqft=avg_price_per_sqft,
+                listing_agent_first_name=str(row.get('Listing Agent First Name', '')),
+                listing_agent_last_name=str(row.get('Listing Agent Last Name', '')),
+                listing_agent_email=str(row.get('Listing Agent Email', '')),
+                listing_agent_phone=str(row.get('Listing Agent Phone', ''))
+            )
+            
+            if property_record.high_potential:
+                high_potential_count += 1
+            
+            db.session.add(property_record)
         
-        props_df['LOI File'] = loi_files
+        # Create Session record
+        session_record = Session(
+            session_id=session_id,
+            business_name=business_name,
+            user_name=user_name,
+            user_email=user_email,
+            total_properties=len(props_df),
+            high_potential_count=high_potential_count,
+            avg_price_per_sqft=avg_price_per_sqft,
+            comps_used=comps_count
+        )
         
-        # Select columns to return (ensure they exist)
-        base_columns = ['Address', 'City', 'State', 'Zip']
-        calculated_columns = ['Listing Price', sqft_col, 'Condition Estimate', 'ARV', 'Offer Price', 'High Potential', 
-                            'LOI File', 'LOI Sent', 'Follow-Up Sent', 'Comps Count', 'Avg Comp $/Sqft']
-        optional_columns = ['Condition Override', 'Listing Agent First Name', 'Listing Agent Last Name', 
-                          'Listing Agent Email', 'Listing Agent Phone']
+        db.session.add(session_record)
+        db.session.commit()
         
-        columns_to_return = base_columns + calculated_columns + optional_columns
-        
-        # Filter columns that actually exist
-        available_columns = [col for col in columns_to_return if col in props_df.columns]
-        filtered_df = props_df[available_columns]
-        
-        # Convert to JSON-serializable format with proper normalization
+        # Return data for display
         data = []
-        for _, row in filtered_df.iterrows():
-            row_dict = {}
-            for col in available_columns:
-                value = row[col]
-                
-                # Handle pandas/numpy types and normalize values
-                if pd.isna(value):
-                    row_dict[col] = ''
-                elif isinstance(value, (np.integer, np.floating)):
-                    if np.isnan(value):
-                        row_dict[col] = ''
-                    else:
-                        row_dict[col] = float(value) if isinstance(value, np.floating) else int(value)
-                elif isinstance(value, (np.bool_, bool)):
-                    # Ensure consistent boolean formatting
-                    row_dict[col] = bool(value)
-                elif col in ['LOI Sent', 'Follow-Up Sent', 'High Potential']:
-                    # Normalize boolean columns specifically
-                    row_dict[col] = normalize_boolean(value)
-                elif col == 'Condition Estimate':
-                    # Normalize condition values
-                    row_dict[col] = normalize_condition(value)
-                else:
-                    row_dict[col] = str(value) if value is not None else ''
+        for _, row in props_df.iterrows():
+            row_dict = {
+                'Address': str(row.get('Address', 'Unknown Address')),
+                'City': str(row.get('City', '')),
+                'State': str(row.get('State', '')),
+                'Zip': str(row.get('Zip', '')),
+                'Listing Price': safe_float(row.get('Listing Price')),
+                sqft_col: safe_float(row.get(sqft_col)),
+                'Condition Estimate': normalize_condition(row.get('Condition Estimate')),
+                'ARV': safe_float(row.get('ARV')),
+                'Offer Price': safe_float(row.get('Offer Price')),
+                'High Potential': bool(row.get('High Potential', False)),
+                'LOI Sent': False,
+                'Follow-Up Sent': False,
+                'Comps Count': comps_count,
+                'Avg Comp $/Sqft': round(avg_price_per_sqft, 2)
+            }
+            
+            # Add optional columns if they exist
+            optional_columns = ['Listing Agent First Name', 'Listing Agent Last Name', 
+                              'Listing Agent Email', 'Listing Agent Phone']
+            for col in optional_columns:
+                if col in props_df.columns:
+                    row_dict[col] = str(row.get(col, ''))
+            
             data.append(row_dict)
         
         # Clean up uploaded files
@@ -369,9 +514,10 @@ def upload():
         return jsonify({
             'data': data, 
             'message': f'Processed {len(data)} properties successfully',
+            'session_id': session_id,
             'metadata': {
                 'total_properties': len(data),
-                'high_potential_count': sum(1 for row in data if row.get('High Potential', False)),
+                'high_potential_count': high_potential_count,
                 'avg_price_per_sqft': round(avg_price_per_sqft, 2),
                 'comps_used': comps_count
             }
@@ -386,7 +532,6 @@ def upload():
 @app.route('/download_loi/<filename>')
 def download_loi(filename):
     try:
-        # Security check - ensure filename is safe
         safe_filename = secure_filename(filename)
         file_path = os.path.join(app.config['GENERATED_FOLDER'], safe_filename)
         
@@ -402,12 +547,10 @@ def download_loi(filename):
 def too_large(e):
     return jsonify({'error': 'File too large. Maximum size is 16MB.'}), 413
 
-# Render deployment configuration
+# Initialize database
+with app.app_context():
+    db.create_all()
+
 if __name__ == '__main__':
-    # Get port from environment variable for Render deployment
     port = int(os.environ.get('PORT', 5000))
-    # Bind to 0.0.0.0 to make it accessible externally
-    # Set debug=False for production
     app.run(host='0.0.0.0', port=port, debug=False)
-
-
