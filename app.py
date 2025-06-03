@@ -41,6 +41,44 @@ def safe_float(val):
     except (ValueError, TypeError):
         return np.nan
 
+def normalize_boolean(val):
+    """Normalize boolean values to consistent format"""
+    if pd.isna(val) or val == '' or val is None:
+        return False
+    
+    # Convert to string and normalize
+    str_val = str(val).strip().lower()
+    
+    # Handle various true representations
+    if str_val in ['true', 'yes', '1', 'y', 't', 'on']:
+        return True
+    elif str_val in ['false', 'no', '0', 'n', 'f', 'off']:
+        return False
+    else:
+        return False
+
+def normalize_condition(val):
+    """Normalize condition values to consistent format"""
+    if pd.isna(val) or val == '' or val is None:
+        return 'Medium'
+    
+    # Convert to string and normalize
+    str_val = str(val).strip().lower()
+    
+    # Map variations to standard values
+    condition_map = {
+        'excellent': 'Excellent',
+        'good': 'Good', 
+        'fair': 'Fair',
+        'poor': 'Poor',
+        'medium': 'Medium',
+        'average': 'Medium',
+        'high': 'Good',
+        'low': 'Poor'
+    }
+    
+    return condition_map.get(str_val, 'Medium')
+
 def read_file(file_path):
     """Read CSV or Excel file with error handling"""
     try:
@@ -242,10 +280,10 @@ def upload():
             logger.error(f"Living square feet column not found. Available columns: {props_df.columns.tolist()}")
             return jsonify({'error': f'Living square feet column not found in property data. Available columns: {props_df.columns.tolist()}'}), 400
         
-        # Calculate property metrics with proper error handling
-        # Handle Condition Estimate properly
+        # Calculate property metrics with proper error handling and normalization
+        # Handle Condition Estimate properly - normalize values
         if 'Condition Override' in props_df.columns:
-            props_df['Condition Estimate'] = props_df['Condition Override'].fillna('Medium')
+            props_df['Condition Estimate'] = props_df['Condition Override'].apply(normalize_condition)
         else:
             props_df['Condition Estimate'] = 'Medium'
         
@@ -256,12 +294,14 @@ def upload():
         props_df['ARV'] = props_df['Living Square Feet Clean'] * avg_price_per_sqft
         props_df['Offer Price'] = props_df['ARV'] * 0.60  # 60% of ARV
         
-        # Determine High Potential properties
-        props_df['High Potential'] = (props_df['Offer Price'] <= (props_df['ARV'] * 0.55))  # 55% or less
+        # Determine High Potential properties - normalize to boolean
+        props_df['High Potential'] = (props_df['Offer Price'] <= (props_df['ARV'] * 0.55)).apply(lambda x: bool(x))
         
         # Add metadata columns
         props_df['Comps Count'] = comps_count
         props_df['Avg Comp $/Sqft'] = round(avg_price_per_sqft, 2)
+        
+        # Normalize boolean columns
         props_df['LOI Sent'] = False
         props_df['Follow-Up Sent'] = False
         
@@ -277,9 +317,6 @@ def upload():
         
         props_df['LOI File'] = loi_files
         
-        # Clean up data for frontend - handle NaN values
-        props_df = props_df.fillna('')
-        
         # Select columns to return (ensure they exist)
         base_columns = ['Address', 'City', 'State', 'Zip']
         calculated_columns = ['Listing Price', sqft_col, 'Condition Estimate', 'ARV', 'Offer Price', 'High Potential', 
@@ -293,13 +330,14 @@ def upload():
         available_columns = [col for col in columns_to_return if col in props_df.columns]
         filtered_df = props_df[available_columns]
         
-        # Convert to JSON-serializable format
+        # Convert to JSON-serializable format with proper normalization
         data = []
         for _, row in filtered_df.iterrows():
             row_dict = {}
             for col in available_columns:
                 value = row[col]
-                # Handle pandas/numpy types
+                
+                # Handle pandas/numpy types and normalize values
                 if pd.isna(value):
                     row_dict[col] = ''
                 elif isinstance(value, (np.integer, np.floating)):
@@ -307,8 +345,15 @@ def upload():
                         row_dict[col] = ''
                     else:
                         row_dict[col] = float(value) if isinstance(value, np.floating) else int(value)
-                elif isinstance(value, np.bool_):
+                elif isinstance(value, (np.bool_, bool)):
+                    # Ensure consistent boolean formatting
                     row_dict[col] = bool(value)
+                elif col in ['LOI Sent', 'Follow-Up Sent', 'High Potential']:
+                    # Normalize boolean columns specifically
+                    row_dict[col] = normalize_boolean(value)
+                elif col == 'Condition Estimate':
+                    # Normalize condition values
+                    row_dict[col] = normalize_condition(value)
                 else:
                     row_dict[col] = str(value) if value is not None else ''
             data.append(row_dict)
@@ -321,7 +366,16 @@ def upload():
             logger.warning(f"Could not remove uploaded files: {str(e)}")
         
         logger.info(f"Successfully processed {len(data)} properties")
-        return jsonify({'data': data, 'message': f'Processed {len(data)} properties successfully'})
+        return jsonify({
+            'data': data, 
+            'message': f'Processed {len(data)} properties successfully',
+            'metadata': {
+                'total_properties': len(data),
+                'high_potential_count': sum(1 for row in data if row.get('High Potential', False)),
+                'avg_price_per_sqft': round(avg_price_per_sqft, 2),
+                'comps_used': comps_count
+            }
+        })
         
     except Exception as e:
         logger.error(f"Upload error: {str(e)}")
